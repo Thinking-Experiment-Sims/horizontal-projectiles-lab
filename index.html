@@ -73,10 +73,16 @@
                 <span>🚀</span> Release Ball
               </button>
               <button type="button" class="btn btn-secondary" id="btnReset" disabled>
-                <span>🔄</span> Reset to Release
+                <span>🔄</span> Reset Ball
               </button>
               <button type="button" class="btn btn-teal" id="btnInspectTarget" disabled>
                 <span>🔍</span> Inspect Target Paper
+              </button>
+              <button type="button" class="btn btn-amber-outline" id="btnRandomSetup" title="Generate new random ramp angle, release point, and table height with a clean slate">
+                <span>🎲</span> New Random Setup
+              </button>
+              <button type="button" class="btn btn-secondary" id="btnCleanSlate" title="Reset all data, clear marks, timer log, target paper, and notebook">
+                <span>🧹</span> Clean Slate
               </button>
             </div>
 
@@ -87,6 +93,15 @@
               <button type="button" class="speed-pill" id="btnSpeedHalf">0.5×</button>
               <button type="button" class="speed-pill" id="btnSpeedQuarter">0.25×</button>
             </div>
+          </div>
+
+          <!-- Quick Setup Presets Bar -->
+          <div class="preset-bar" aria-label="Apparatus Presets">
+            <span class="preset-label">⚙️ Quick Setups:</span>
+            <button type="button" class="preset-pill active" id="presetStandard" data-angle="30" data-release="0.45" data-height="0.90">Standard (30°, 45cm, 0.90m)</button>
+            <button type="button" class="preset-pill" id="presetGentle" data-angle="20" data-release="0.30" data-height="0.75">Gentle (20°, 30cm, 0.75m)</button>
+            <button type="button" class="preset-pill" id="presetSteep" data-angle="40" data-release="0.65" data-height="1.15">Steep &amp; High (40°, 65cm, 1.15m)</button>
+            <button type="button" class="preset-pill random" id="presetRandom">🎲 Randomize Values</button>
           </div>
 
           <!-- Apparatus Parameters (Inclination, Release Point, Table Height) -->
@@ -204,6 +219,9 @@
             <button type="button" class="btn btn-primary" id="btnPlaceTarget">
               <span>📄</span> Place Target Paper on Floor
             </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnClearTargetMarks" title="Wipe previous carbon dots to get a fresh target sheet">
+              <span>🧹</span> Fresh Paper
+            </button>
           </div>
 
           <div style="margin-top: 0.75rem;">
@@ -224,7 +242,11 @@
             <div class="card-title">
               <span>📓</span> Student Lab Notebook
             </div>
-            <span style="font-size: 0.76rem; color: var(--muted); font-weight: 600;">Inquiry Investigation</span>
+            <div style="display: flex; align-items: center; gap: 0.45rem;">
+              <button type="button" class="btn btn-sm btn-secondary" id="btnClearNotebook" title="Clear student notebook entries">
+                <span>🧹</span> Clear Notes
+              </button>
+            </div>
           </div>
 
           <!-- Step 1: Photogate Speed Data -->

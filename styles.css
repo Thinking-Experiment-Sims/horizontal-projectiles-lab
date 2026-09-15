@@ -348,6 +348,19 @@ body {
   color: var(--primary-teal-dark);
 }
 
+.btn-amber-outline {
+  background: var(--accent-amber-light);
+  color: var(--accent-amber-dark);
+  border: 1px solid var(--accent-amber-border);
+}
+
+.btn-amber-outline:hover:not(:disabled) {
+  background: var(--accent-amber);
+  color: #ffffff;
+  border-color: var(--accent-amber-dark);
+  transform: translateY(-1px);
+}
+
 .btn-sm {
   padding: 0.35rem 0.75rem;
   font-size: 0.8rem;
@@ -386,12 +399,68 @@ body {
   border-color: var(--primary-teal-dark);
 }
 
+/* Apparatus Quick Preset Pills */
+.preset-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+}
+
+.preset-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--primary-teal-dark);
+  margin-right: 0.2rem;
+}
+
+.preset-pill {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-pill:hover {
+  background: var(--primary-teal-light);
+  border-color: var(--primary-teal-border);
+  color: var(--primary-teal-dark);
+}
+
+.preset-pill.active {
+  background: var(--primary-teal);
+  color: #ffffff;
+  border-color: var(--primary-teal-dark);
+}
+
+.preset-pill.random {
+  background: var(--accent-amber-light);
+  border-color: var(--accent-amber-border);
+  color: var(--accent-amber-dark);
+  font-weight: 700;
+}
+
+.preset-pill.random:hover {
+  background: var(--accent-amber);
+  color: #ffffff;
+}
+
 /* Apparatus Parameter Sliders Grid */
 .apparatus-params-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
-  margin-top: 1rem;
+  margin-top: 0.75rem;
   padding: 1rem;
   background: #ffffff;
   border: 1px solid var(--border);

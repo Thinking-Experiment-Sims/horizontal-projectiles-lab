@@ -122,6 +122,16 @@
     btnPlaceTarget: document.getElementById("btnPlaceTarget"),
     btnInspectTarget: document.getElementById("btnInspectTarget"),
     btnClearLog: document.getElementById("btnClearLog"),
+    btnRandomSetup: document.getElementById("btnRandomSetup"),
+    btnCleanSlate: document.getElementById("btnCleanSlate"),
+    btnClearTargetMarks: document.getElementById("btnClearTargetMarks"),
+    btnClearNotebook: document.getElementById("btnClearNotebook"),
+
+    // Quick Presets
+    presetStandard: document.getElementById("presetStandard"),
+    presetGentle: document.getElementById("presetGentle"),
+    presetSteep: document.getElementById("presetSteep"),
+    presetRandom: document.getElementById("presetRandom"),
 
     // Speed buttons
     btnSpeed1x: document.getElementById("btnSpeed1x"),
@@ -1252,6 +1262,13 @@
       targetCtx.fillStyle = state.targetPaper.carbonPaperLifted ? "#64748b" : "#cbd5e1";
       targetCtx.font = "italic 13px Inter, sans-serif";
       targetCtx.fillText("No ball strikes recorded yet. Release the ball onto the target to test your prediction!", centerPx, h / 2);
+      if (dom.modalEvalSummary) {
+        dom.modalEvalSummary.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 0.85rem; padding: 0.5rem 0;">
+            No ball impacts on this sheet yet. Release the ball onto the placed target paper to record a carbon mark!
+          </div>
+        `;
+      }
       return;
     }
 
@@ -1302,12 +1319,156 @@
   }
 
   /* ==========================================================================
+     Preset & Slate Management Helpers
+     ========================================================================== */
+  function setActivePreset(activePill) {
+    const pills = [dom.presetStandard, dom.presetGentle, dom.presetSteep, dom.presetRandom];
+    pills.forEach(pill => {
+      if (pill) pill.classList.remove("active");
+    });
+    if (activePill) {
+      activePill.classList.add("active");
+    }
+  }
+
+  function applyPreset(angle, release, height, activePill) {
+    state.rampAngleDeg = angle;
+    state.releaseDistance = release;
+    state.tableHeight = height;
+
+    if (dom.sliderAngle) dom.sliderAngle.value = angle;
+    if (dom.valAngle) dom.valAngle.textContent = `${angle}°`;
+
+    if (dom.sliderRelease) dom.sliderRelease.value = release;
+    if (dom.valRelease) dom.valRelease.textContent = `${(release * 100).toFixed(0)} cm`;
+
+    if (dom.sliderHeight) dom.sliderHeight.value = height;
+    if (dom.valHeight) dom.valHeight.textContent = `${height.toFixed(2)} m`;
+    if (dom.nbTableHeight) dom.nbTableHeight.textContent = `${height.toFixed(2)} m`;
+
+    setActivePreset(activePill);
+    resetBallToRelease();
+  }
+
+  function randomizeSetup(clearAll = true) {
+    // Generate distinct, realistic physics values
+    const angles = [20, 25, 30, 35, 40];
+    const angle = angles[Math.floor(Math.random() * angles.length)];
+
+    const releaseOptions = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60];
+    const release = releaseOptions[Math.floor(Math.random() * releaseOptions.length)];
+
+    const heightOptions = [0.75, 0.80, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10];
+    const height = heightOptions[Math.floor(Math.random() * heightOptions.length)];
+
+    applyPreset(angle, release, height, dom.presetRandom);
+
+    if (clearAll) {
+      cleanSlate();
+      setActivePreset(dom.presetRandom);
+    }
+  }
+
+  function clearNotebook() {
+    if (dom.nbAvgTime) dom.nbAvgTime.value = "";
+    if (dom.nbCalcVx) dom.nbCalcVx.value = "";
+    if (dom.nbCalcFallTime) dom.nbCalcFallTime.value = "";
+    if (dom.nbCalcXPred) dom.nbCalcXPred.value = "";
+  }
+
+  function clearTargetMarks() {
+    state.targetPaper.strikes = [];
+    state.targetPaper.carbonPaperLifted = false;
+    if (dom.btnLiftCarbon) {
+      dom.btnLiftCarbon.textContent = "🔍 Lift Carbon Paper (View Crease)";
+    }
+    if (dom.targetStatusBadge) {
+      dom.targetStatusBadge.textContent = state.targetPaper.placed
+        ? "Paper Placed on Floor (Fresh Sheet)"
+        : "Not Placed";
+      dom.targetStatusBadge.className = "target-status-badge";
+    }
+    if (dom.inspectModal && dom.inspectModal.classList.contains("open")) {
+      renderTargetCloseup();
+    }
+    if (state.targetPaper.placed) {
+      updateBannerStatus("ready");
+    }
+  }
+
+  function cleanSlate() {
+    // 1. Reset timer & trials
+    state.timer.trials = [];
+    state.timer.status = "READY";
+    state.timer.elapsedTime = 0;
+    state.timer.gate1Active = false;
+    state.timer.gate2Active = false;
+    if (dom.readoutTime) dom.readoutTime.textContent = "0.0000";
+    if (dom.nbGate1Time) dom.nbGate1Time.textContent = "--";
+    if (dom.nbGate2Time) dom.nbGate2Time.textContent = "--";
+    if (dom.nbGate3Time) dom.nbGate3Time.textContent = "--";
+    renderTrialsLog();
+
+    // 2. Clear target paper & carbon strikes
+    state.targetPaper.placed = false;
+    state.targetPaper.strikes = [];
+    state.targetPaper.carbonPaperLifted = false;
+    if (dom.btnPlaceTarget) {
+      dom.btnPlaceTarget.textContent = "📄 Place Target Paper on Floor";
+      dom.btnPlaceTarget.className = "btn btn-primary";
+    }
+    if (dom.targetStatusBadge) {
+      dom.targetStatusBadge.textContent = "Not Placed";
+      dom.targetStatusBadge.className = "target-status-badge";
+    }
+    if (dom.btnInspectTarget) dom.btnInspectTarget.disabled = true;
+    if (dom.btnLiftCarbon) {
+      dom.btnLiftCarbon.textContent = "🔍 Lift Carbon Paper (View Crease)";
+    }
+
+    // 3. Clear student notebook entries
+    clearNotebook();
+
+    // 4. Reset ball & banner
+    resetBallToRelease();
+    updateBannerStatus("practice");
+  }
+
+  /* ==========================================================================
      Event Handlers & Interactivity
      ========================================================================== */
   function bindEvents() {
     // Primary buttons
     dom.btnRelease.addEventListener("click", releaseBall);
     dom.btnReset.addEventListener("click", resetBallToRelease);
+    if (dom.btnRandomSetup) {
+      dom.btnRandomSetup.addEventListener("click", () => randomizeSetup(true));
+    }
+    if (dom.btnCleanSlate) {
+      dom.btnCleanSlate.addEventListener("click", cleanSlate);
+    }
+
+    // Quick apparatus presets
+    if (dom.presetStandard) {
+      dom.presetStandard.addEventListener("click", () => {
+        applyPreset(30, 0.45, 0.90, dom.presetStandard);
+      });
+    }
+    if (dom.presetGentle) {
+      dom.presetGentle.addEventListener("click", () => {
+        applyPreset(20, 0.30, 0.75, dom.presetGentle);
+      });
+    }
+    if (dom.presetSteep) {
+      dom.presetSteep.addEventListener("click", () => {
+        applyPreset(40, 0.65, 1.15, dom.presetSteep);
+      });
+    }
+    if (dom.presetRandom) {
+      dom.presetRandom.addEventListener("click", () => {
+        randomizeSetup(true);
+      });
+    }
 
     // Speed controls
     dom.btnSpeed1x.addEventListener("click", () => setSimSpeed(1.0, dom.btnSpeed1x));
@@ -1341,12 +1502,14 @@
     dom.sliderAngle.addEventListener("input", (e) => {
       state.rampAngleDeg = parseFloat(e.target.value);
       dom.valAngle.textContent = `${state.rampAngleDeg}°`;
+      setActivePreset(null);
       resetBallToRelease();
     });
 
     dom.sliderRelease.addEventListener("input", (e) => {
       state.releaseDistance = parseFloat(e.target.value);
       dom.valRelease.textContent = `${(state.releaseDistance * 100).toFixed(0)} cm`;
+      setActivePreset(null);
       resetBallToRelease();
     });
 
@@ -1354,6 +1517,7 @@
       state.tableHeight = parseFloat(e.target.value);
       dom.valHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
       dom.nbTableHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
+      setActivePreset(null);
       resetBallToRelease();
     });
 
@@ -1373,6 +1537,14 @@
         updateBannerStatus("practice");
       }
     });
+
+    if (dom.btnClearTargetMarks) {
+      dom.btnClearTargetMarks.addEventListener("click", clearTargetMarks);
+    }
+
+    if (dom.btnClearNotebook) {
+      dom.btnClearNotebook.addEventListener("click", clearNotebook);
+    }
 
     dom.inputCreaseX.addEventListener("change", (e) => {
       let val = parseFloat(e.target.value);
@@ -1511,6 +1683,7 @@
         state.releaseDistance = clampedS;
         dom.sliderRelease.value = clampedS;
         dom.valRelease.textContent = `${(clampedS * 100).toFixed(0)} cm`;
+        setActivePreset(null);
         resetBallToRelease();
         e.preventDefault();
       } else if (state.dragging === "target") {
