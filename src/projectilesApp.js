@@ -6,6 +6,11 @@
  * table height measurement, hotdog-folded target paper with carbon paper placement,
  * and zero-clue student inquiry.
  * 
+ * Includes:
+ * 1. Ball catching at table edge before target paper is placed (hides landing trajectory).
+ * 2. Permanent session locking via localStorage (cannot reload and try again).
+ * 3. Teacher Reset Override with PIN authentication.
+ * 
  * Part of "The Thinking Experiment" PhysicsKit.
  * Strictly adheres to SI Metric units and The Thinking Experiment design system.
  */
@@ -19,6 +24,9 @@
     console.error("ProjectilesPhysics module is required.");
     return;
   }
+
+  // Storage key for anti-cheating session lock
+  const STORAGE_KEY = "the_thinking_experiment_projectile_lab_v1";
 
   // Cross-browser safe rounded rectangle path helper (no ctx.roundRect)
   function drawRoundedRect(ctx, x, y, width, height, radius) {
@@ -47,7 +55,7 @@
     gate2X: -0.20, // 20 cm before table edge (m)
 
     // Ball simulation state
-    // Phase: 'ready', 'rolling_ramp', 'rolling_table', 'flying', 'bounced', 'stopped'
+    // Phase: 'ready', 'rolling_ramp', 'rolling_table', 'caught', 'flying', 'bounced', 'stopped'
     phase: "ready",
     ball: {
       s: 0.45, // distance along ramp
@@ -63,21 +71,24 @@
 
     // Photogate timer console
     timer: {
-      status: "READY", // 'READY', 'GATE_1', 'STOPPED'
+      status: "READY", // 'READY', 'TIMING', 'STOPPED'
       elapsedTime: 0, // current run's photogate transit time (s)
       gate1Active: false,
       gate2Active: false,
-      trials: [] // array of photogate times: [t1, t2, t3, ...]
+      trials: [] // array of photogate times: [ {trial, time} ]
     },
 
     // Target Paper Setup
     targetPaper: {
       placed: false,
-      creaseX: 1.15, // student-specified predicted landing distance (m)
+      creaseX: 1.150, // student-specified predicted landing distance (m)
       length: Physics.PAPER_LENGTH, // ~0.28m
       carbonPaperLifted: false,
       strikes: [] // list of impacts { dropNum, actualX, creaseX, devMm, evalResult }
     },
+
+    // Permanent Anti-Cheating Lock
+    isLocked: false, // true once official landing test is released onto target paper
 
     // Experimental settings
     noiseEnabled: true, // realistic slight hand/track scatter across 3 trials
@@ -92,7 +103,7 @@
     trajectoryPath: [],
 
     // Interaction & dragging
-    dragging: null, // 'ball', 'target', 'heightTape'
+    dragging: null, // 'ball', 'target'
     mouseWorld: { x: 0, y: 0 }
   };
 
@@ -103,6 +114,12 @@
     // Canvas elements
     canvas: document.getElementById("simCanvas"),
     targetCanvas: document.getElementById("targetCanvas"),
+
+    // Lock banner
+    lockBanner: document.getElementById("lockBanner"),
+    lockBannerBadge: document.getElementById("lockBannerBadge"),
+    lockBannerText: document.getElementById("lockBannerText"),
+    lockBannerSub: document.getElementById("lockBannerSub"),
 
     // Buttons
     btnRelease: document.getElementById("btnRelease"),
@@ -143,11 +160,19 @@
     readoutTime: document.getElementById("readoutTime"),
     trialsLogBody: document.getElementById("trialsLogBody"),
 
-    // Modal
+    // Modals
     inspectModal: document.getElementById("inspectModal"),
     btnCloseModal: document.getElementById("btnCloseModal"),
     btnLiftCarbon: document.getElementById("btnLiftCarbon"),
     modalEvalSummary: document.getElementById("modalEvalSummary"),
+
+    teacherModal: document.getElementById("teacherModal"),
+    btnTeacherReset: document.getElementById("btnTeacherReset"),
+    btnCloseTeacherModal: document.getElementById("btnCloseTeacherModal"),
+    btnCancelTeacherReset: document.getElementById("btnCancelTeacherReset"),
+    btnConfirmTeacherReset: document.getElementById("btnConfirmTeacherReset"),
+    teacherPinInput: document.getElementById("teacherPinInput"),
+    teacherPinError: document.getElementById("teacherPinError"),
 
     // Student Notebook
     nbGate1Time: document.getElementById("nbGate1Time"),
@@ -167,9 +192,6 @@
   /* ==========================================================================
      World Coordinate Mapping & Geometry
      ========================================================================== */
-  // World bounds in meters:
-  // Floor is y = 0. Table launch edge is x = 0, y = tableHeight.
-  // x spans from -0.85m to +2.45m. y spans from -0.15m to 1.70m.
   const world = {
     xMin: -0.85,
     xMax: 2.45,
@@ -206,21 +228,14 @@
     const angleRad = Physics.degToRad(state.rampAngleDeg);
     const R = world.rampTransitionRadius;
     const tableH = state.tableHeight;
-    const footX = world.transitionStartX; // where ramp meets horizontal table
+    const footX = world.transitionStartX;
 
-    // The curved transition connects horizontally at (footX, tableH)
-    // with radius R tangent to horizontal.
-    // Arc center:
     const arcCenterX = footX;
     const arcCenterY = tableH + R;
     
-    // Transition point from arc to straight incline:
-    // Angle from bottom of circle is angleRad
     const transX = arcCenterX - R * Math.sin(angleRad);
     const transY = arcCenterY - R * Math.cos(angleRad);
 
-    // Straight ramp extends backwards along angleRad:
-    // s is measured along incline from the transition point
     const maxS = 0.80; // max rail length
     const topX = transX - maxS * Math.cos(angleRad);
     const topY = transY + maxS * Math.sin(angleRad);
@@ -241,25 +256,20 @@
 
   /**
    * Returns world (x, y) coordinates for a ball positioned at distance s on the ramp.
-   * s >= 0: along the straight incline
-   * s < 0: along the curved transition foot
    */
   function getBallRampCoordinates(s) {
     const geom = getRampGeometry();
     const rBall = state.ball.radius;
 
     if (s >= 0) {
-      // Along straight incline
-      // Offset outwards normal to incline: normal vector is (-sin, cos)
       const normalX = -Math.sin(geom.angleRad);
       const normalY = Math.cos(geom.angleRad);
       const px = geom.transX - s * Math.cos(geom.angleRad) + normalX * rBall;
       const py = geom.transY + s * Math.sin(geom.angleRad) + normalY * rBall;
       return { x: px, y: py, angle: -geom.angleRad };
     } else {
-      // On curved foot: s is negative distance along arc
       const arcDist = Math.max(-geom.R * geom.angleRad, s);
-      const theta = -arcDist / geom.R; // angle from horizontal (0 to angleRad)
+      const theta = -arcDist / geom.R;
       const px = geom.arcCenterX - (geom.R - rBall) * Math.sin(theta);
       const py = geom.arcCenterY - (geom.R - rBall) * Math.cos(theta);
       return { x: px, y: py, angle: -theta };
@@ -273,6 +283,8 @@
   let animFrameId = null;
 
   function resetBallToRelease() {
+    if (state.isLocked) return;
+
     state.phase = "ready";
     state.ball.s = state.releaseDistance;
     state.ball.vx = 0;
@@ -281,22 +293,34 @@
     state.ball.tFlight = 0;
     state.trajectoryPath = [];
     
-    // Update ball coordinates to ramp release position
     const pos = getBallRampCoordinates(state.ball.s);
     state.ball.x = pos.x;
     state.ball.y = pos.y;
 
-    // Reset console active LEDs
     state.timer.gate1Active = false;
     state.timer.gate2Active = false;
     updateConsoleLEDs();
 
     dom.btnRelease.disabled = false;
     dom.btnReset.disabled = true;
+
+    if (!state.targetPaper.placed) {
+      updateLockBanner("practice");
+    } else {
+      updateLockBanner("ready");
+    }
   }
 
   function releaseBall() {
-    if (state.phase !== "ready") return;
+    if (state.phase !== "ready" || state.isLocked) return;
+
+    // If target paper is placed, this is the OFFICIAL ONE-SHOT DROP! Lock the lab!
+    if (state.targetPaper.placed) {
+      state.isLocked = true;
+      saveLockState();
+      lockUI();
+      updateLockBanner("armed");
+    }
 
     // Calculate exit velocity with optional realistic noise
     const noiseStd = state.noiseEnabled ? state.noiseStdDev : 0;
@@ -324,11 +348,9 @@
   }
 
   function updateSimulation(dt) {
-    if (state.phase === "ready" || state.phase === "stopped") return;
+    if (state.phase === "ready" || state.phase === "stopped" || state.phase === "caught") return;
 
-    // Apply simulation speed multiplier
     const simDt = dt * state.simSpeed;
-
     const geom = getRampGeometry();
     const g = Physics.G;
     const rBall = state.ball.radius;
@@ -337,15 +359,8 @@
 
     // 1. ROLLING DOWN RAMP
     if (state.phase === "rolling_ramp") {
-      // Rolling acceleration along incline: a = (5/7) * g * sin(theta)
       const aIncline = (5 / 7) * g * Math.sin(geom.angleRad);
-      
-      // We calculate progress based on exit velocity and energy curve
-      // For smooth animation across the curved foot:
       const totalArcLen = geom.R * geom.angleRad;
-      const totalRampDist = state.releaseDistance + totalArcLen;
-      
-      // Estimate current speed along track
       const distTraveled = state.releaseDistance - state.ball.s;
       const currentSpeed = Math.min(vExit, Math.max(0.05, Math.sqrt(2 * aIncline * Math.max(0, distTraveled))));
       
@@ -353,7 +368,6 @@
       state.ball.rotation += (currentSpeed * simDt) / rBall;
 
       if (state.ball.s <= -totalArcLen) {
-        // Exited ramp onto flat horizontal table!
         state.phase = "rolling_table";
         state.ball.x = geom.footX;
         state.ball.y = tableH + rBall;
@@ -373,11 +387,11 @@
       state.ball.y = tableH + rBall;
       state.ball.rotation += (state.ball.vx * simDt) / rBall;
 
-      // Photogate beam detection logic
+      // Photogate beam detection
       const g1X = state.gate1X;
       const g2X = state.gate2X;
 
-      // Passing Gate 1:
+      // Gate 1 Trigger:
       if (prevX < g1X && state.ball.x >= g1X) {
         state.timer.status = "TIMING";
         state.timer.gate1Active = true;
@@ -390,33 +404,45 @@
         dom.readoutTime.textContent = state.timer.elapsedTime.toFixed(4);
       }
 
-      // Passing Gate 2:
+      // Gate 2 Trigger:
       if (prevX < g2X && state.ball.x >= g2X) {
         state.timer.status = "STOPPED";
         state.timer.gate2Active = true;
         
-        // Exact transit time Delta t = d / v
         const exactTransitTime = Physics.calculatePhotogateTime(state.ball.vx, state.photogateDistance);
         state.timer.elapsedTime = exactTransitTime;
         dom.readoutTime.textContent = exactTransitTime.toFixed(4);
         
-        // Log this trial into photogate memory
         logPhotogateTrial(exactTransitTime);
         updateConsoleLEDs();
       }
 
-      // Reaching Table Launch Edge (x = 0)
-      if (state.ball.x >= 0) {
-        state.phase = "flying";
-        state.ball.x = 0;
-        state.ball.y = tableH + rBall;
-        state.ball.vy = 0; // purely horizontal launch
-        state.ball.tFlight = 0;
-        state.trajectoryPath.push({ x: state.ball.x, y: state.ball.y });
+      // 🛑 CRITICAL CLASSROOM LOGIC:
+      // If target paper is NOT placed: Ball is CAUGHT at table edge in catch box!
+      if (!state.targetPaper.placed) {
+        if (state.ball.x >= -0.04) {
+          state.phase = "caught";
+          state.ball.x = -0.02;
+          state.ball.vx = 0;
+          state.ball.vy = 0;
+          dom.btnReset.disabled = false;
+          dom.btnRelease.disabled = true;
+          updateLockBanner("caught");
+        }
+      } else {
+        // Target paper IS placed: Free launch off table edge!
+        if (state.ball.x >= 0) {
+          state.phase = "flying";
+          state.ball.x = 0;
+          state.ball.y = tableH + rBall;
+          state.ball.vy = 0;
+          state.ball.tFlight = 0;
+          state.trajectoryPath.push({ x: state.ball.x, y: state.ball.y });
+        }
       }
     }
 
-    // 3. FREE PROJECTILE FLIGHT IN AIR
+    // 3. FREE PROJECTILE FLIGHT IN AIR (Only when paper is placed!)
     else if (state.phase === "flying") {
       state.ball.tFlight += simDt;
       state.ball.x += state.ball.vx * simDt;
@@ -426,17 +452,17 @@
 
       state.trajectoryPath.push({ x: state.ball.x, y: state.ball.y });
 
-      // Check collision with floor (y <= rBall)
+      // Collision with floor (y <= rBall)
       if (state.ball.y <= rBall) {
         state.ball.y = rBall;
         handleFloorImpact(state.ball.x);
         state.phase = "bounced";
-        state.ball.vy = -state.ball.vy * 0.35; // bounce restitution
+        state.ball.vy = -state.ball.vy * 0.35;
         state.ball.vx *= 0.65;
       }
     }
 
-    // 4. BOUNCING & ROLLING TO STOP ON FLOOR
+    // 4. BOUNCING & ROLLING TO STOP ON TARGET PAPER / FLOOR
     else if (state.phase === "bounced") {
       state.ball.x += state.ball.vx * simDt;
       state.ball.vy -= g * simDt;
@@ -452,6 +478,10 @@
           state.phase = "stopped";
           state.ball.vx = 0;
           state.ball.vy = 0;
+          // Save completed locked state to localStorage
+          saveLockState();
+          lockUI();
+          updateLockBanner("locked");
         }
       }
     }
@@ -465,7 +495,6 @@
     const isTargetPlaced = state.targetPaper.placed;
     const creaseX = state.targetPaper.creaseX;
 
-    // Evaluate target hit
     const evalResult = Physics.evaluateTargetHit(landingX, creaseX, state.targetPaper.length);
 
     state.targetPaper.strikes.push({
@@ -478,19 +507,208 @@
       timestamp: new Date().toLocaleTimeString()
     });
 
-    // Update target status badge
     if (isTargetPlaced) {
       dom.targetStatusBadge.textContent = `${evalResult.rating} (${evalResult.absDeviationMm.toFixed(1)} mm)`;
       dom.targetStatusBadge.className = `target-status-badge ${evalResult.badgeClass}`;
       dom.btnInspectTarget.disabled = false;
-    } else {
-      dom.targetStatusBadge.textContent = `Landed at ${landingX.toFixed(3)} m (Target not placed)`;
-      dom.targetStatusBadge.className = "target-status-badge";
+      saveLockState();
     }
 
-    // Automatically refresh target closeup modal if currently open
     if (dom.inspectModal.classList.contains("open")) {
       renderTargetCloseup();
+    }
+  }
+
+  /**
+   * Updates the lock banner status above the canvas.
+   */
+  function updateLockBanner(mode) {
+    if (!dom.lockBanner) return;
+
+    if (mode === "practice" || (!state.targetPaper.placed && !state.isLocked)) {
+      dom.lockBanner.className = "lock-banner practice";
+      dom.lockBannerBadge.textContent = "🧤 Practice Timing";
+      dom.lockBannerText.textContent = "Ball is caught at table edge. Landing is hidden until you place the folded carbon target paper!";
+      dom.lockBannerSub.textContent = "Landing Hidden";
+    } else if (mode === "caught") {
+      dom.lockBanner.className = "lock-banner practice";
+      dom.lockBannerBadge.textContent = "🧤 Ball Caught";
+      dom.lockBannerText.textContent = `Timing logged (Δt = ${state.timer.elapsedTime.toFixed(4)} s). Calculate velocity & fall time, then place target paper!`;
+      dom.lockBannerSub.textContent = "Safe in Catch Box";
+    } else if (mode === "ready" || (state.targetPaper.placed && !state.isLocked)) {
+      dom.lockBanner.className = "lock-banner ready";
+      dom.lockBannerBadge.textContent = "⚠️ Official Test Armed";
+      dom.lockBannerText.textContent = "Target paper placed! You have ONE SHOT to hit the crease. Once released, reloading will NOT reset your test!";
+      dom.lockBannerSub.textContent = "One Shot • No Retries";
+    } else if (mode === "armed") {
+      dom.lockBanner.className = "lock-banner locked";
+      dom.lockBannerBadge.textContent = "🔒 Flight in Progress";
+      dom.lockBannerText.textContent = "Official test launched! Results are being recorded to carbon paper...";
+      dom.lockBannerSub.textContent = "Locked";
+    } else if (mode === "locked" || state.isLocked) {
+      dom.lockBanner.className = "lock-banner locked";
+      dom.lockBannerBadge.textContent = "🔒 Test Completed & Locked";
+      dom.lockBannerText.textContent = "Official test recorded. Reloading preserves your result. Inspect the target paper to evaluate your prediction!";
+      dom.lockBannerSub.textContent = "Permanently Recorded";
+    }
+  }
+
+  /**
+   * Locks all interactive controls once the official drop is executed.
+   */
+  function lockUI() {
+    dom.sliderAngle.disabled = true;
+    dom.sliderRelease.disabled = true;
+    dom.sliderHeight.disabled = true;
+    dom.sliderCreaseX.disabled = true;
+    dom.inputCreaseX.disabled = true;
+    dom.btnPlaceTarget.disabled = true;
+    dom.btnRelease.disabled = true;
+    dom.btnRelease.innerHTML = "<span>🔒</span> Test Completed (Locked)";
+    dom.btnReset.disabled = true;
+    dom.btnClearLog.disabled = true;
+    dom.btnApplyNotebookPred.disabled = true;
+    dom.btnInspectTarget.disabled = false;
+  }
+
+  /**
+   * Unlocks all interactive controls (only via Teacher Reset).
+   */
+  function unlockUI() {
+    dom.sliderAngle.disabled = false;
+    dom.sliderRelease.disabled = false;
+    dom.sliderHeight.disabled = false;
+    dom.sliderCreaseX.disabled = false;
+    dom.inputCreaseX.disabled = false;
+    dom.btnPlaceTarget.disabled = false;
+    dom.btnRelease.disabled = false;
+    dom.btnRelease.innerHTML = "<span>🚀</span> Release Ball";
+    dom.btnReset.disabled = true;
+    dom.btnClearLog.disabled = false;
+    dom.btnApplyNotebookPred.disabled = false;
+  }
+
+  /**
+   * Saves locked test state to localStorage so reloading cannot bypass the test.
+   */
+  function saveLockState() {
+    const data = {
+      isLocked: state.isLocked,
+      phase: state.phase,
+      rampAngleDeg: state.rampAngleDeg,
+      releaseDistance: state.releaseDistance,
+      tableHeight: state.tableHeight,
+      photogateDistance: state.photogateDistance,
+      timerTrials: state.timer.trials,
+      lastElapsedTime: state.timer.elapsedTime,
+      targetPaper: state.targetPaper,
+      trajectoryPath: state.trajectoryPath,
+      ballFinal: {
+        x: state.ball.x,
+        y: state.ball.y,
+        rotation: state.ball.rotation
+      }
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+      console.warn("Unable to save lock state to localStorage", e);
+    }
+  }
+
+  /**
+   * Restores locked state on page reload / refresh.
+   */
+  function loadLockState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (!data || !data.isLocked) return false;
+
+      state.isLocked = true;
+      state.rampAngleDeg = data.rampAngleDeg;
+      state.releaseDistance = data.releaseDistance;
+      state.tableHeight = data.tableHeight;
+      state.photogateDistance = data.photogateDistance || 0.100;
+      state.timer.trials = data.timerTrials || [];
+      state.timer.elapsedTime = data.lastElapsedTime || 0;
+      state.targetPaper = data.targetPaper || state.targetPaper;
+      state.targetPaper.placed = true;
+      state.trajectoryPath = data.trajectoryPath || [];
+
+      state.phase = "stopped";
+      if (data.ballFinal) {
+        state.ball.x = data.ballFinal.x;
+        state.ball.y = data.ballFinal.y;
+        state.ball.rotation = data.ballFinal.rotation;
+      }
+
+      // Sync slider UI
+      dom.sliderAngle.value = state.rampAngleDeg;
+      dom.valAngle.textContent = `${state.rampAngleDeg}°`;
+      dom.sliderRelease.value = state.releaseDistance;
+      dom.valRelease.textContent = `${(state.releaseDistance * 100).toFixed(0)} cm`;
+      dom.sliderHeight.value = state.tableHeight;
+      dom.valHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
+      dom.nbTableHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
+
+      if (state.targetPaper.creaseX) {
+        dom.inputCreaseX.value = state.targetPaper.creaseX.toFixed(3);
+        dom.sliderCreaseX.value = state.targetPaper.creaseX;
+      }
+
+      renderTrialsLog();
+      if (state.timer.elapsedTime > 0) {
+        dom.readoutTime.textContent = state.timer.elapsedTime.toFixed(4);
+      }
+
+      const lastStrike = state.targetPaper.strikes[state.targetPaper.strikes.length - 1];
+      if (lastStrike && lastStrike.evalResult) {
+        dom.targetStatusBadge.textContent = `${lastStrike.evalResult.rating} (${lastStrike.evalResult.absDeviationMm.toFixed(1)} mm)`;
+        dom.targetStatusBadge.className = `target-status-badge ${lastStrike.evalResult.badgeClass}`;
+      }
+
+      lockUI();
+      updateLockBanner("locked");
+      return true;
+    } catch (e) {
+      console.warn("Error reading localStorage lock state", e);
+      return false;
+    }
+  }
+
+  /**
+   * Teacher Reset: Clears lock and resets simulation.
+   */
+  function executeTeacherReset() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {}
+
+    state.isLocked = false;
+    state.targetPaper.placed = false;
+    state.targetPaper.strikes = [];
+    state.timer.trials = [];
+    state.trajectoryPath = [];
+
+    unlockUI();
+    resetBallToRelease();
+    renderTrialsLog();
+    updateLockBanner("practice");
+
+    dom.readoutTime.textContent = "0.0000";
+    dom.nbGate1Time.textContent = "--";
+    dom.nbGate2Time.textContent = "--";
+    dom.nbGate3Time.textContent = "--";
+    dom.btnPlaceTarget.textContent = "📄 Place Target Paper on Floor";
+    dom.btnPlaceTarget.className = "btn btn-primary";
+    dom.targetStatusBadge.textContent = "Not Placed";
+    dom.targetStatusBadge.className = "target-status-badge";
+    dom.btnInspectTarget.disabled = true;
+
+    if (dom.teacherModal) {
+      dom.teacherModal.classList.remove("open");
     }
   }
 
@@ -506,7 +724,6 @@
 
     renderTrialsLog();
 
-    // Autofill photogate times in student notebook for convenience
     if (trialNum === 1) dom.nbGate1Time.textContent = transitTime.toFixed(4) + " s";
     if (trialNum === 2) dom.nbGate2Time.textContent = transitTime.toFixed(4) + " s";
     if (trialNum === 3) dom.nbGate3Time.textContent = transitTime.toFixed(4) + " s";
@@ -557,32 +774,35 @@
     const h = dom.canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    // 1. Draw Lab Room Background (Floor, Wall, Subtle Grid)
+    // 1. Draw Lab Room Background
     drawEnvironment();
 
     // 2. Draw Lab Table & Mounts
     drawTable();
 
-    // 3. Draw Ramp Track on Table
+    // 3. Draw Catch Box (when target paper is not placed)
+    drawCatchBox();
+
+    // 4. Draw Ramp Track on Table
     drawRamp();
 
-    // 4. Draw Photogates & Infrared Beams
+    // 5. Draw Photogates & Infrared Beams
     drawPhotogates();
 
-    // 5. Draw Measuring Tools (Plumb Line, Height Tape, Floor Scale)
+    // 6. Draw Measuring Tools (Plumb Line, Height Tape, Floor Scale)
     if (state.showFloorTape) drawFloorTape();
     if (state.showPlumbLine) drawPlumbLine();
     if (state.showHeightTape) drawHeightTape();
 
-    // 6. Draw Folded Target Paper with Carbon Paper on Floor
+    // 7. Draw Folded Target Paper with Carbon Paper on Floor
     drawTargetPaperOnFloor();
 
-    // 7. Draw Trajectory Trail
+    // 8. Draw Trajectory Trail (Only when paper was placed and official flight happened)
     if (state.showTrajectory && state.trajectoryPath.length > 1) {
       drawTrajectory();
     }
 
-    // 8. Draw Ball
+    // 9. Draw Ball
     drawBall();
   }
 
@@ -594,14 +814,13 @@
     const h = dom.canvas.height;
     const floorP = worldToScreen(0, 0);
 
-    // Wall background
     ctx.fillStyle = "#f8fafc";
     ctx.fillRect(0, 0, w, floorP.y);
 
-    // Wall blueprint grid
+    // Blueprint grid
     ctx.strokeStyle = "rgba(15, 126, 155, 0.05)";
     ctx.lineWidth = 1;
-    const gridStep = 0.20; // 20 cm grid in world
+    const gridStep = 0.20;
     for (let wx = Math.floor(world.xMin / gridStep) * gridStep; wx <= world.xMax; wx += gridStep) {
       const p1 = worldToScreen(wx, 0);
       const p2 = worldToScreen(wx, world.yMax);
@@ -619,7 +838,7 @@
       ctx.stroke();
     }
 
-    // Baseboard along bottom of wall
+    // Baseboard
     ctx.fillStyle = "#e2e8f0";
     ctx.fillRect(0, floorP.y - 14, w, 14);
     ctx.strokeStyle = "#cbd5e1";
@@ -633,7 +852,6 @@
     ctx.fillStyle = floorGrad;
     ctx.fillRect(0, floorP.y, w, h - floorP.y);
 
-    // Floor surface line
     ctx.strokeStyle = "#0f7e9b";
     ctx.lineWidth = 2.5;
     ctx.beginPath();
@@ -647,9 +865,9 @@
    */
   function drawTable() {
     const tableH = state.tableHeight;
-    const tableTopThick = 0.04; // 4 cm thick tabletop
+    const tableTopThick = 0.04;
     const tableLeftX = -0.75;
-    const tableRightX = 0.00; // Launch edge is at x = 0
+    const tableRightX = 0.00;
 
     const pTopLeft = worldToScreen(tableLeftX, tableH);
     const pTopRight = worldToScreen(tableRightX, tableH);
@@ -659,24 +877,19 @@
 
     const legWidthPx = 14;
 
-    // Table legs (Sturdy brushed dark steel)
     ctx.fillStyle = "#334155";
     ctx.strokeStyle = "#1e293b";
     ctx.lineWidth = 1;
 
-    // Left leg
     ctx.fillRect(pBottomLeft.x + 8, pBottomLeft.y, legWidthPx, pFloorLeft.y - pBottomLeft.y);
     ctx.strokeRect(pBottomLeft.x + 8, pBottomLeft.y, legWidthPx, pFloorLeft.y - pBottomLeft.y);
 
-    // Right leg
     ctx.fillRect(pTopRight.x - 22, pBottomLeft.y, legWidthPx, pFloorRight.y - pBottomLeft.y);
     ctx.strokeRect(pTopRight.x - 22, pBottomLeft.y, legWidthPx, pFloorRight.y - pBottomLeft.y);
 
-    // Cross brace
     const braceY = (pBottomLeft.y + pFloorLeft.y) * 0.65;
     ctx.fillRect(pBottomLeft.x + 8, braceY, (pTopRight.x - 22) - (pBottomLeft.x + 8), 8);
 
-    // Wooden tabletop with bevel and highlight
     const topW = pTopRight.x - pTopLeft.x;
     const topH = pBottomLeft.y - pTopLeft.y;
 
@@ -688,16 +901,14 @@
     ctx.fillStyle = woodGrad;
     ctx.fillRect(pTopLeft.x, pTopLeft.y, topW, topH);
     
-    // Top surface shine
     ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
     ctx.fillRect(pTopLeft.x, pTopLeft.y, topW, 2);
 
-    // Front edge outline
     ctx.strokeStyle = "#451a03";
     ctx.lineWidth = 1.5;
     ctx.strokeRect(pTopLeft.x, pTopLeft.y, topW, topH);
 
-    // Aluminum track rail along table top
+    // Aluminum track rail
     const trackP1 = worldToScreen(world.transitionStartX, tableH);
     const trackP2 = worldToScreen(0, tableH);
     ctx.fillStyle = "#94a3b8";
@@ -708,6 +919,40 @@
   }
 
   /**
+   * Renders the Catch Box mounted at the table edge (hides landing until paper is placed).
+   */
+  function drawCatchBox() {
+    if (state.targetPaper.placed) return;
+
+    const tableH = state.tableHeight;
+    const boxLeft = worldToScreen(-0.06, tableH);
+    const boxRight = worldToScreen(0.02, tableH);
+    const boxTop = worldToScreen(-0.06, tableH + 0.075);
+
+    const w = boxRight.x - boxLeft.x;
+    const h = boxLeft.y - boxTop.y;
+
+    // Rigid catcher frame
+    ctx.fillStyle = "#334155";
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.5;
+    drawRoundedRect(ctx, boxLeft.x, boxTop.y, w, h, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // Dense blue foam lining inside
+    ctx.fillStyle = "#0284c7";
+    drawRoundedRect(ctx, boxLeft.x + 3, boxTop.y + 3, w - 6, h - 4, 2);
+    ctx.fill();
+
+    // Box label
+    ctx.fillStyle = "var(--primary-teal-dark)";
+    ctx.font = "bold 9px JetBrains Mono, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("🧤 CATCH BOX", (boxLeft.x + boxRight.x) / 2, boxTop.y - 6);
+  }
+
+  /**
    * Renders the curved incline ramp mounted on the table.
    */
   function drawRamp() {
@@ -715,19 +960,16 @@
     const tableH = state.tableHeight;
     const rBall = state.ball.radius;
 
-    // Track rail path (upper surface of rail)
     ctx.strokeStyle = "#0f7e9b";
     ctx.lineWidth = 4;
     ctx.lineCap = "round";
     ctx.beginPath();
 
-    // Straight portion
     const pTop = worldToScreen(geom.topX, geom.topY);
     const pTrans = worldToScreen(geom.transX, geom.transY);
     ctx.moveTo(pTop.x, pTop.y);
     ctx.lineTo(pTrans.x, pTrans.y);
 
-    // Curved transition foot
     const steps = 20;
     for (let i = 1; i <= steps; i++) {
       const sArc = -(i / steps) * (geom.R * geom.angleRad);
@@ -737,7 +979,7 @@
     }
     ctx.stroke();
 
-    // Ramp support bracket & clamp onto table
+    // Ramp support bracket
     ctx.fillStyle = "rgba(15, 126, 155, 0.12)";
     ctx.strokeStyle = "#0f7e9b";
     ctx.lineWidth = 1.5;
@@ -765,7 +1007,6 @@
       const tPos = getBallRampCoordinates(sTick);
       const stPos = worldToScreen(tPos.x, tPos.y - rBall);
       
-      // Tick normal to rail
       const nx = -Math.sin(geom.angleRad);
       const ny = Math.cos(geom.angleRad);
       const tickLen = (i % 2 === 0) ? 7 : 4;
@@ -780,7 +1021,7 @@
       }
     }
 
-    // Angle indicator arc near table
+    // Angle indicator arc
     const pArcCenter = worldToScreen(geom.topX, tableH);
     ctx.strokeStyle = "var(--accent-amber)";
     ctx.lineWidth = 2;
@@ -791,7 +1032,7 @@
     ctx.font = "bold 10px JetBrains Mono, monospace";
     ctx.fillText(`θ=${state.rampAngleDeg}°`, pArcCenter.x + 38, pArcCenter.y - 6);
 
-    // Release stop indicator pin at current release position
+    // Release stop indicator pin
     const relPos = getBallRampCoordinates(state.releaseDistance);
     const sRel = worldToScreen(relPos.x, relPos.y);
     ctx.strokeStyle = "var(--accent-amber)";
@@ -808,26 +1049,20 @@
     const tableH = state.tableHeight;
     const g1 = worldToScreen(state.gate1X, tableH);
     const g2 = worldToScreen(state.gate2X, tableH);
-    const gateH = 34; // height of U-bracket
+    const gateH = 34;
 
     function drawSingleGate(gx, active, label) {
-      // Photogate black bracket
       ctx.fillStyle = "#1e293b";
       ctx.strokeStyle = "#0f172a";
       ctx.lineWidth = 1;
 
-      // Base mount
       ctx.fillRect(gx - 6, g1.y - 2, 12, 6);
-
-      // Vertical post
       ctx.fillRect(gx - 3, g1.y - gateH, 6, gateH);
 
-      // Top sensor housing
       drawRoundedRect(ctx, gx - 8, g1.y - gateH - 8, 16, 10, 3);
       ctx.fill();
       ctx.stroke();
 
-      // Infrared beam (dashed red line when active/inactive)
       ctx.strokeStyle = active ? "rgba(220, 38, 38, 0.9)" : "rgba(15, 126, 155, 0.4)";
       ctx.lineWidth = active ? 2 : 1;
       ctx.setLineDash([2, 2]);
@@ -837,13 +1072,11 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Gate label badge
       ctx.fillStyle = active ? "#dc2626" : "#0f7e9b";
       ctx.font = "bold 9px JetBrains Mono, monospace";
       ctx.textAlign = "center";
       ctx.fillText(label, gx, g1.y - gateH - 12);
 
-      // Glowing LED on bracket
       ctx.fillStyle = active ? "#ef4444" : "#22c55e";
       ctx.beginPath();
       ctx.arc(gx, g1.y - gateH - 3, 2.5, 0, Math.PI * 2);
@@ -853,7 +1086,7 @@
     drawSingleGate(g1.x, state.timer.gate1Active, "G1");
     drawSingleGate(g2.x, state.timer.gate2Active, "G2");
 
-    // Dimension line between photogates showing known distance d = 10.0 cm
+    // Dimension line between gates
     ctx.strokeStyle = "var(--primary-teal)";
     ctx.lineWidth = 1.2;
     const dimY = g1.y - gateH - 24;
@@ -862,7 +1095,6 @@
     ctx.lineTo(g2.x, dimY);
     ctx.stroke();
 
-    // Arrows
     ctx.fillStyle = "var(--primary-teal)";
     ctx.beginPath();
     ctx.moveTo(g1.x, dimY - 3); ctx.lineTo(g1.x + 5, dimY); ctx.lineTo(g1.x, dimY + 3); ctx.fill();
@@ -875,14 +1107,12 @@
 
   /**
    * Renders the plumb line suspended from the launch edge (x = 0) down to floor.
-   * Establishes the origin x = 0 on the floor, matching real lab practice!
    */
   function drawPlumbLine() {
     const tableH = state.tableHeight;
     const pTop = worldToScreen(0, tableH);
     const pFloor = worldToScreen(0, 0);
 
-    // Plumb cord
     ctx.strokeStyle = "#64748b";
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 2]);
@@ -892,20 +1122,18 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Brass plumb bob hanging just above floor
     const bobY = pFloor.y - 10;
     ctx.fillStyle = "#d97706";
     ctx.strokeStyle = "#92400e";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(pFloor.x, pFloor.y - 2); // pointed tip
+    ctx.moveTo(pFloor.x, pFloor.y - 2);
     ctx.lineTo(pFloor.x - 5, bobY - 8);
     ctx.lineTo(pFloor.x + 5, bobY - 8);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Origin label on floor
     ctx.fillStyle = "var(--primary-teal-dark)";
     ctx.font = "bold 10px JetBrains Mono, monospace";
     ctx.textAlign = "center";
@@ -917,11 +1145,10 @@
    */
   function drawHeightTape() {
     const tableH = state.tableHeight;
-    const tapeX = 0.12; // 12 cm to the right of table edge
+    const tapeX = 0.12;
     const pFloor = worldToScreen(tapeX, 0);
     const pTop = worldToScreen(tapeX, tableH);
 
-    // Ruler body (bright yellow-white fiberglass tape)
     const tapeW = 16;
     ctx.fillStyle = "#fffbeb";
     ctx.strokeStyle = "#d97706";
@@ -929,13 +1156,12 @@
     ctx.fillRect(pTop.x - tapeW / 2, pTop.y, tapeW, pFloor.y - pTop.y);
     ctx.strokeRect(pTop.x - tapeW / 2, pTop.y, tapeW, pFloor.y - pTop.y);
 
-    // Ruler graduation ticks every 5 cm and 10 cm
     ctx.strokeStyle = "#78350f";
     ctx.fillStyle = "#78350f";
     ctx.font = "8px JetBrains Mono, monospace";
     ctx.textAlign = "right";
 
-    const stepM = 0.05; // 5 cm
+    const stepM = 0.05;
     for (let y = 0; y <= tableH + 0.01; y += stepM) {
       const py = worldToScreen(tapeX, y).y;
       const isMajor = Math.round(y * 100) % 10 === 0;
@@ -951,7 +1177,6 @@
       }
     }
 
-    // Indicator flag at table height reading
     ctx.fillStyle = "var(--accent-amber)";
     ctx.beginPath();
     ctx.moveTo(pTop.x + tapeW / 2 + 2, pTop.y);
@@ -975,18 +1200,16 @@
     const tapeY = pStart.y + 6;
     const tapeH = 14;
 
-    // Fiberglass metric floor tape strip
     ctx.fillStyle = "#ffffff";
     ctx.strokeStyle = "#94a3b8";
     ctx.lineWidth = 1;
     ctx.fillRect(pStart.x, tapeY, pEnd.x - pStart.x, tapeH);
     ctx.strokeRect(pStart.x, tapeY, pEnd.x - pStart.x, tapeH);
 
-    // Graduation ticks every 10 cm & 5 cm
     ctx.font = "8px JetBrains Mono, monospace";
     ctx.textAlign = "center";
 
-    const step = 0.05; // 5 cm
+    const step = 0.05;
     for (let x = 0; x <= world.xMax; x += step) {
       const px = worldToScreen(x, 0).x;
       const is10cm = Math.round(x * 100) % 10 === 0;
@@ -1021,10 +1244,10 @@
     const pCrease = worldToScreen(creaseX, 0);
 
     const paperW = pEnd.x - pStart.x;
-    const paperH = 18; // screen thickness on floor
+    const paperH = 18;
     const paperY = pStart.y - 3;
 
-    // White sheet underneath
+    // White paper sheet underneath
     ctx.fillStyle = "#ffffff";
     ctx.strokeStyle = "#cbd5e1";
     ctx.lineWidth = 1;
@@ -1032,14 +1255,14 @@
     ctx.fill();
     ctx.stroke();
 
-    // Dark Carbon Paper on top (semi-translucent if not lifted)
+    // Dark Carbon Paper on top
     if (!state.targetPaper.carbonPaperLifted) {
-      ctx.fillStyle = "rgba(30, 41, 59, 0.88)"; // carbon black
+      ctx.fillStyle = "rgba(30, 41, 59, 0.88)";
       drawRoundedRect(ctx, pStart.x + 2, paperY + 1, paperW - 4, paperH - 2, 2);
       ctx.fill();
     }
 
-    // Distinct Hotdog Crease down center of paper
+    // Folded Crease down center of paper
     ctx.strokeStyle = state.targetPaper.carbonPaperLifted ? "#0f7e9b" : "#38bdf8";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -1047,30 +1270,26 @@
     ctx.lineTo(pCrease.x, paperY + paperH + 4);
     ctx.stroke();
 
-    // Crease Flag & Label
     ctx.fillStyle = "var(--accent-amber-dark)";
     ctx.font = "bold 9px JetBrains Mono, monospace";
     ctx.textAlign = "center";
     ctx.fillText(`Crease: ${creaseX.toFixed(3)} m`, pCrease.x, paperY - 8);
 
-    // Draw previous carbon impact marks on the paper
+    // Carbon impact marks
     state.targetPaper.strikes.forEach(strike => {
       const sp = worldToScreen(strike.actualX, 0);
       
-      // Carbon mark dot
       ctx.fillStyle = "#000000";
       ctx.beginPath();
       ctx.arc(sp.x, paperY + paperH / 2, 3.5, 0, Math.PI * 2);
       ctx.fill();
 
-      // Outer splatter ring
       ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(sp.x, paperY + paperH / 2, 5, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Drop # badge
       ctx.fillStyle = "#ffffff";
       ctx.font = "bold 8px Inter, sans-serif";
       ctx.fillText(strike.dropNum, sp.x, paperY + paperH / 2 + 2.5);
@@ -1097,19 +1316,17 @@
   }
 
   /**
-   * Renders the steel ball with specular shine and rotation stripe.
+   * Renders the steel ball.
    */
   function drawBall() {
     const bp = worldToScreen(state.ball.x, state.ball.y);
     const rPx = state.ball.radius * world.scaleX;
 
-    // Subtle drop shadow
     ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
     ctx.beginPath();
     ctx.ellipse(bp.x, bp.y + rPx * 0.9, rPx * 0.9, rPx * 0.35, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Ball body (Brushed Chrome/Steel gradient)
     const ballGrad = ctx.createRadialGradient(
       bp.x - rPx * 0.35,
       bp.y - rPx * 0.35,
@@ -1131,7 +1348,6 @@
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Rotation orientation mark so students see it rolling
     ctx.save();
     ctx.translate(bp.x, bp.y);
     ctx.rotate(state.ball.rotation);
@@ -1155,12 +1371,10 @@
     targetCtx.clearRect(0, 0, w, h);
 
     const creaseX = state.targetPaper.creaseX;
-    const paperLen = state.targetPaper.length; // ~0.28m = 280 mm
-    const halfLenMm = (paperLen * 1000) / 2; // 140 mm
+    const paperLen = state.targetPaper.length;
     const pxPerMm = (w - 80) / (paperLen * 1000);
-    const centerPx = w / 2; // Exact center is the Crease
+    const centerPx = w / 2;
 
-    // 1. Draw Clean White Paper Sheet with hotdog fold crease
     targetCtx.fillStyle = "#ffffff";
     targetCtx.strokeStyle = "#94a3b8";
     targetCtx.lineWidth = 1.5;
@@ -1168,7 +1382,6 @@
     targetCtx.fill();
     targetCtx.stroke();
 
-    // Subtle paper fold shading on left & right halves
     const leftFoldGrad = targetCtx.createLinearGradient(30, 0, centerPx, 0);
     leftFoldGrad.addColorStop(0, "rgba(241, 245, 249, 0.8)");
     leftFoldGrad.addColorStop(0.9, "rgba(255, 255, 255, 0)");
@@ -1183,36 +1396,30 @@
     targetCtx.fillStyle = rightFoldGrad;
     targetCtx.fillRect(centerPx, 25, w - 30 - centerPx, h - 50);
 
-    // Carbon paper overlay if not lifted
     if (!state.targetPaper.carbonPaperLifted) {
-      targetCtx.fillStyle = "rgba(15, 23, 42, 0.82)"; // dark graphite carbon
+      targetCtx.fillStyle = "rgba(15, 23, 42, 0.82)";
       drawRoundedRect(targetCtx, 40, 35, w - 80, h - 70, 4);
       targetCtx.fill();
     }
 
-    // 2. The Folded Crease Line (Center: exactly 0 mm deviation)
     targetCtx.strokeStyle = state.targetPaper.carbonPaperLifted ? "#0f7e9b" : "#38bdf8";
     targetCtx.lineWidth = 2.5;
-    targetCtx.setLineDash([]);
     targetCtx.beginPath();
     targetCtx.moveTo(centerPx, 15);
     targetCtx.lineTo(centerPx, h - 15);
     targetCtx.stroke();
 
-    // Crease banner
     targetCtx.fillStyle = "var(--primary-teal-dark)";
     targetCtx.font = "bold 12px JetBrains Mono, monospace";
     targetCtx.textAlign = "center";
     targetCtx.fillText(`★ THE CREASE (Prediction = ${creaseX.toFixed(3)} m) ★`, centerPx, 18);
 
-    // 3. Millimeter Vernier Ruler across the paper
     const rulerY = h - 65;
     targetCtx.strokeStyle = state.targetPaper.carbonPaperLifted ? "#334155" : "#94a3b8";
     targetCtx.fillStyle = state.targetPaper.carbonPaperLifted ? "#1e293b" : "#e2e8f0";
     targetCtx.lineWidth = 1;
     targetCtx.font = "9px JetBrains Mono, monospace";
 
-    // Draw ticks every 5 mm and 10 mm relative to crease
     for (let dMm = -120; dMm <= 120; dMm += 5) {
       const xPos = centerPx + dMm * pxPerMm;
       const is10 = dMm % 10 === 0;
@@ -1229,12 +1436,11 @@
       }
     }
 
-    // 4. Draw Carbon Strike Marks on Target Paper
     const strikes = state.targetPaper.strikes;
     if (strikes.length === 0) {
       targetCtx.fillStyle = state.targetPaper.carbonPaperLifted ? "#64748b" : "#cbd5e1";
       targetCtx.font = "italic 13px Inter, sans-serif";
-      targetCtx.fillText("No ball strikes recorded yet. Release the ball to land on the target!", centerPx, h / 2);
+      targetCtx.fillText("No ball strikes recorded yet. Release the ball onto the target to test your prediction!", centerPx, h / 2);
       return;
     }
 
@@ -1243,7 +1449,6 @@
       const strikeX = centerPx + devMm * pxPerMm;
       const strikeY = h / 2 + (idx - (strikes.length - 1) / 2) * 26;
 
-      // Carbon impact mark with realistic splatter ring
       targetCtx.fillStyle = "#000000";
       targetCtx.beginPath();
       targetCtx.arc(strikeX, strikeY, 5.5, 0, Math.PI * 2);
@@ -1255,7 +1460,6 @@
       targetCtx.arc(strikeX, strikeY, 8.5, 0, Math.PI * 2);
       targetCtx.stroke();
 
-      // Strike label
       targetCtx.fillStyle = "var(--accent-amber-dark)";
       targetCtx.font = "bold 11px JetBrains Mono, monospace";
       targetCtx.textAlign = "center";
@@ -1263,7 +1467,6 @@
       targetCtx.fillText(`Drop #${strike.dropNum} (${devSign} mm)`, strikeX, strikeY - 12);
     });
 
-    // Update modal evaluation summary cards
     const latest = strikes[strikes.length - 1];
     if (latest && latest.evalResult) {
       dom.modalEvalSummary.innerHTML = `
@@ -1323,20 +1526,23 @@
       dom.toggleNoise.textContent = state.noiseEnabled ? "🎲 Real Scatter: ON" : "🎯 Ideal Physics: ON";
     });
 
-    // Apparatus sliders
+    // Apparatus sliders (only if not locked)
     dom.sliderAngle.addEventListener("input", (e) => {
+      if (state.isLocked) return;
       state.rampAngleDeg = parseFloat(e.target.value);
       dom.valAngle.textContent = `${state.rampAngleDeg}°`;
       resetBallToRelease();
     });
 
     dom.sliderRelease.addEventListener("input", (e) => {
+      if (state.isLocked) return;
       state.releaseDistance = parseFloat(e.target.value);
       dom.valRelease.textContent = `${(state.releaseDistance * 100).toFixed(0)} cm`;
       resetBallToRelease();
     });
 
     dom.sliderHeight.addEventListener("input", (e) => {
+      if (state.isLocked) return;
       state.tableHeight = parseFloat(e.target.value);
       dom.valHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
       dom.nbTableHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
@@ -1345,20 +1551,24 @@
 
     // Target Placement Controls
     dom.btnPlaceTarget.addEventListener("click", () => {
+      if (state.isLocked) return;
       state.targetPaper.placed = !state.targetPaper.placed;
       if (state.targetPaper.placed) {
         dom.btnPlaceTarget.textContent = "📄 Remove Target Paper";
         dom.btnPlaceTarget.className = "btn btn-secondary";
         dom.targetStatusBadge.textContent = "Paper Placed on Floor";
         dom.btnInspectTarget.disabled = false;
+        updateLockBanner("ready");
       } else {
         dom.btnPlaceTarget.textContent = "📄 Place Target Paper on Floor";
         dom.btnPlaceTarget.className = "btn btn-primary";
         dom.targetStatusBadge.textContent = "Not Placed";
+        updateLockBanner("practice");
       }
     });
 
     dom.inputCreaseX.addEventListener("change", (e) => {
+      if (state.isLocked) return;
       let val = parseFloat(e.target.value);
       if (isNaN(val) || val < 0.2) val = 0.2;
       if (val > 2.3) val = 2.3;
@@ -1368,6 +1578,7 @@
     });
 
     dom.sliderCreaseX.addEventListener("input", (e) => {
+      if (state.isLocked) return;
       const val = parseFloat(e.target.value);
       state.targetPaper.creaseX = val;
       dom.inputCreaseX.value = val.toFixed(3);
@@ -1397,6 +1608,7 @@
 
     // Clear trial logs
     dom.btnClearLog.addEventListener("click", () => {
+      if (state.isLocked) return;
       state.timer.trials = [];
       state.targetPaper.strikes = [];
       dom.readoutTime.textContent = "0.0000";
@@ -1409,8 +1621,9 @@
       resetBallToRelease();
     });
 
-    // Student notebook: Apply predicted landing distance to target paper crease
+    // Student notebook apply prediction
     dom.btnApplyNotebookPred.addEventListener("click", () => {
+      if (state.isLocked) return;
       const predVal = parseFloat(dom.nbCalcXPred.value);
       if (!isNaN(predVal) && predVal > 0.2 && predVal <= 2.4) {
         state.targetPaper.creaseX = predVal;
@@ -1421,12 +1634,46 @@
         dom.btnPlaceTarget.className = "btn btn-secondary";
         dom.targetStatusBadge.textContent = `Crease Set to ${predVal.toFixed(3)} m`;
         dom.btnInspectTarget.disabled = false;
+        updateLockBanner("ready");
       } else {
         alert("Please enter a valid predicted landing distance between 0.20 m and 2.40 m.");
       }
     });
 
-    // Mouse / Touch drag on canvas to adjust ball release or target crease
+    // Teacher Reset Modal Events
+    if (dom.btnTeacherReset) {
+      dom.btnTeacherReset.addEventListener("click", () => {
+        dom.teacherPinError.style.display = "none";
+        dom.teacherPinInput.value = "";
+        dom.teacherModal.classList.add("open");
+        dom.teacherPinInput.focus();
+      });
+    }
+
+    if (dom.btnCloseTeacherModal) {
+      dom.btnCloseTeacherModal.addEventListener("click", () => {
+        dom.teacherModal.classList.remove("open");
+      });
+    }
+
+    if (dom.btnCancelTeacherReset) {
+      dom.btnCancelTeacherReset.addEventListener("click", () => {
+        dom.teacherModal.classList.remove("open");
+      });
+    }
+
+    if (dom.btnConfirmTeacherReset) {
+      dom.btnConfirmTeacherReset.addEventListener("click", () => {
+        const pin = dom.teacherPinInput.value.trim().toLowerCase();
+        if (pin === "physics" || pin === "reset") {
+          executeTeacherReset();
+        } else {
+          dom.teacherPinError.style.display = "block";
+        }
+      });
+    }
+
+    // Canvas interactions
     bindCanvasInteractions();
   }
 
@@ -1458,10 +1705,11 @@
     window.addEventListener("touchend", handlePointerUp);
 
     function handlePointerDown(e) {
+      if (state.isLocked) return;
+
       const pos = getCanvasCoords(e);
       state.mouseWorld = pos.world;
 
-      // Check if clicking near the ball on the ramp to drag release position
       if (state.phase === "ready") {
         const ballScreen = worldToScreen(state.ball.x, state.ball.y);
         const dist = Math.hypot(pos.sx - ballScreen.x, pos.sy - ballScreen.y);
@@ -1472,7 +1720,6 @@
         }
       }
 
-      // Check if clicking target paper to drag crease along floor
       if (state.targetPaper.placed) {
         const creaseScreen = worldToScreen(state.targetPaper.creaseX, 0);
         if (Math.abs(pos.sx - creaseScreen.x) < 30 && Math.abs(pos.sy - creaseScreen.y) < 35) {
@@ -1484,11 +1731,10 @@
     }
 
     function handlePointerMove(e) {
-      if (!state.dragging) return;
+      if (!state.dragging || state.isLocked) return;
       const pos = getCanvasCoords(e);
 
       if (state.dragging === "ball" && state.phase === "ready") {
-        // Project world position onto straight ramp
         const geom = getRampGeometry();
         const dx = geom.transX - pos.world.x;
         const dy = pos.world.y - geom.transY;
@@ -1518,7 +1764,7 @@
      ========================================================================== */
   function animLoop(timestamp) {
     if (!lastTimestamp) lastTimestamp = timestamp;
-    const dt = Math.min(0.05, (timestamp - lastTimestamp) / 1000); // capped at 50ms
+    const dt = Math.min(0.05, (timestamp - lastTimestamp) / 1000);
     lastTimestamp = timestamp;
 
     updateSimulation(dt);
@@ -1533,10 +1779,16 @@
   function init() {
     updateWorldScale();
     bindEvents();
-    resetBallToRelease();
-    renderTrialsLog();
-    dom.nbTableHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
 
+    // Check if test was locked in localStorage (prevents reload and try again)
+    const wasLocked = loadLockState();
+    if (!wasLocked) {
+      resetBallToRelease();
+      renderTrialsLog();
+      updateLockBanner("practice");
+    }
+
+    dom.nbTableHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
     animFrameId = requestAnimationFrame(animLoop);
   }
 
