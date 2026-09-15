@@ -1,0 +1,18 @@
+{
+  "name": "horizontal-projectiles-lab",
+  "version": "1.0.0",
+  "description": "Horizontal Projectiles Lab: Bullseye & Carbon Paper Simulation - The Thinking Experiment",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test tests/projectilesPhysics.test.js"
+  },
+  "keywords": [
+    "physics",
+    "kinematics",
+    "projectiles",
+    "photogates",
+    "the-thinking-experiment"
+  ],
+  "author": "Vladimir Lopez",
+  "license": "ISC"
+}

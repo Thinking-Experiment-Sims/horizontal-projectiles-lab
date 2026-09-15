@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Horizontal Projectiles Lab: Bullseye &amp; Carbon Paper | The Thinking Experiment</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Decorative blueprint grid matching The Thinking Experiment Hub -->
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <div class="shell">
+    <!-- Header Banner -->
+    <header class="hero">
+      <div class="hero-top">
+        <div>
+          <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.35rem;">
+            <a href="https://thinking-experiment-sims.github.io/interactive-physics/" class="brand-badge" style="text-decoration: none;" title="Return to Physics Simulations Hub">← The Thinking Experiment</a>
+            <span class="lab-badge">🎯 Physics Inquiry Lab</span>
+          </div>
+          <h1>Horizontal Projectiles: Bullseye &amp; Carbon Paper Lab</h1>
+          <p class="hero-subtitle">
+            Roll a ball down the incline and across the table through two photogates. Use the measured transit time and table height to determine the ball's horizontal velocity and fall time, then predict where the ball lands. Place your folded target paper with carbon paper at your predicted spot and release the ball to strike the crease!
+          </p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Layout Grid -->
+    <div class="layout-grid">
+      <!-- LEFT COLUMN: Canvas Simulation Stage & Apparatus Controls -->
+      <section class="stage-column" aria-label="Laboratory Simulation Apparatus">
+        <!-- Interactive Canvas Stage -->
+        <div class="card" style="padding: 0.85rem;">
+          <div class="simulation-viewport">
+            <canvas id="simCanvas" width="1280" height="720"></canvas>
+
+            <!-- Floating Tool Toggles on Top-Right of Canvas -->
+            <div class="canvas-floating-controls" aria-label="Measurement Display Tools">
+              <button type="button" class="tool-toggle-btn active" id="togglePlumb" title="Toggle Plumb Line from table edge">
+                <span>📍</span> Plumb Line
+              </button>
+              <button type="button" class="tool-toggle-btn active" id="toggleHeightTape" title="Toggle Vertical Height Tape">
+                <span>📏</span> Height Tape
+              </button>
+              <button type="button" class="tool-toggle-btn active" id="toggleFloorTape" title="Toggle Floor Metric Scale">
+                <span>📐</span> Floor Tape
+              </button>
+              <button type="button" class="tool-toggle-btn active" id="toggleTrajectory" title="Toggle Projectile Trajectory Trail">
+                <span>📈</span> Trajectory
+              </button>
+              <button type="button" class="tool-toggle-btn active" id="toggleNoise" title="Toggle Realistic Scatter vs Ideal Physics">
+                🎲 Real Scatter: ON
+              </button>
+            </div>
+          </div>
+
+          <!-- Simulation Action Controls & Speed Bar -->
+          <div class="sim-controls-bar">
+            <div class="action-btn-group">
+              <button type="button" class="btn btn-primary" id="btnRelease">
+                <span>🚀</span> Release Ball
+              </button>
+              <button type="button" class="btn btn-secondary" id="btnReset" disabled>
+                <span>🔄</span> Reset to Release
+              </button>
+              <button type="button" class="btn btn-teal" id="btnInspectTarget" disabled>
+                <span>🔍</span> Inspect Target Paper
+              </button>
+            </div>
+
+            <!-- Simulation Speed Pills -->
+            <div class="speed-selector">
+              <span>Speed:</span>
+              <button type="button" class="speed-pill active" id="btnSpeed1x">1.0×</button>
+              <button type="button" class="speed-pill" id="btnSpeedHalf">0.5×</button>
+              <button type="button" class="speed-pill" id="btnSpeedQuarter">0.25×</button>
+            </div>
+          </div>
+
+          <!-- Apparatus Parameters (Inclination, Release Point, Table Height) -->
+          <div class="apparatus-params-grid">
+            <!-- 1. Ramp Incline -->
+            <div class="param-item">
+              <div class="param-label-row">
+                <span>Ramp Incline Angle (<span class="math-expr">θ</span>):</span>
+                <span class="param-val-badge" id="valAngle">30°</span>
+              </div>
+              <input type="range" class="range-slider" id="sliderAngle" min="15" max="45" step="1" value="30">
+              <span class="param-caption">Adjust ramp slope (15° to 45°)</span>
+            </div>
+
+            <!-- 2. Ball Release Position on Ramp -->
+            <div class="param-item">
+              <div class="param-label-row">
+                <span>Release Position along Ramp:</span>
+                <span class="param-val-badge" id="valRelease">45 cm</span>
+              </div>
+              <input type="range" class="range-slider" id="sliderRelease" min="0.15" max="0.75" step="0.01" value="0.45">
+              <span class="param-caption">Drag ball directly on ramp or use slider</span>
+            </div>
+
+            <!-- 3. Table Height -->
+            <div class="param-item">
+              <div class="param-label-row">
+                <span>Table Height (<span class="math-expr">H</span>):</span>
+                <span class="param-val-badge" id="valHeight">0.90 m</span>
+              </div>
+              <input type="range" class="range-slider" id="sliderHeight" min="0.60" max="1.30" step="0.01" value="0.90">
+              <span class="param-caption">Distance from floor to table surface (0.60 to 1.30 m)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Photogate Digital Timer Console -->
+        <div class="photogate-console" aria-label="Digital Photogate Timer Console">
+          <div class="console-header">
+            <div class="console-title">
+              <span>⏱️</span> Digital Photogate Timer (Pulse Mode: Gate 1 → Gate 2)
+            </div>
+            <div class="gate-beam-indicators">
+              <div class="beam-led">
+                <span class="led-dot" id="ledGate1"></span>
+                <span>GATE 1</span>
+              </div>
+              <div class="beam-led">
+                <span class="led-dot amber" id="ledGate2"></span>
+                <span>GATE 2</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="console-screen-row">
+            <div class="digital-readout-box">
+              <div class="readout-label">Gate 1 → Gate 2 Transit Time (Δt)</div>
+              <div class="readout-digits">
+                <span id="readoutTime">0.0000</span><span class="readout-unit">s</span>
+              </div>
+            </div>
+
+            <div class="digital-readout-box">
+              <div class="readout-label">Known Gate Separation (d)</div>
+              <div class="readout-digits" style="color: #34d399;">
+                10.0<span class="readout-unit">cm (0.100 m)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Trials Log Table -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.6rem;">
+            <span style="font-size: 0.8rem; font-weight: 700; color: #e6f4f8;">Drop Trials Memory Log (3 Recommended)</span>
+            <button type="button" class="btn btn-sm btn-secondary" id="btnClearLog" style="background:#1e293b; color:#cbd5e1; border-color:#334155;">
+              <span>🧹</span> Clear Log
+            </button>
+          </div>
+
+          <table class="trials-log-table">
+            <thead>
+              <tr>
+                <th>Trial</th>
+                <th>Transit Time (s)</th>
+                <th>Transit Time (ms)</th>
+              </tr>
+            </thead>
+            <tbody id="trialsLogBody">
+              <tr>
+                <td colspan="3" style="text-align: center; color: #7a94a0;">No drop trials recorded yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Target Paper Placement Card -->
+        <div class="target-placement-card">
+          <div class="target-header">
+            <div class="target-title">
+              <span>📄</span> Folded Target Paper ("Hotdog Style") &amp; Carbon Paper
+            </div>
+            <span class="target-status-badge" id="targetStatusBadge">Not Placed</span>
+          </div>
+
+          <p style="font-size: 0.84rem; color: var(--muted); margin-bottom: 0.85rem;">
+            Fold a sheet of white paper lengthwise ("hotdog style") and position its center crease exactly where you predict the ball will land. Place a sheet of carbon paper on top. When the ball hits, it leaves a black carbon dot!
+          </p>
+
+          <div class="target-inputs-row">
+            <div class="target-input-wrap">
+              <label for="inputCreaseX" style="font-size: 0.85rem; font-weight: 600;">Paper Crease Position (<span class="math-expr">x<sub>pred</sub></span>):</label>
+              <input type="number" id="inputCreaseX" class="target-num-input" min="0.2" max="2.3" step="0.001" value="1.150">
+              <span style="font-size: 0.85rem; font-weight: 600; color: var(--primary-teal-dark);">m from table edge</span>
+            </div>
+
+            <button type="button" class="btn btn-primary" id="btnPlaceTarget">
+              <span>📄</span> Place Target Paper on Floor
+            </button>
+          </div>
+
+          <div style="margin-top: 0.75rem;">
+            <input type="range" class="range-slider" id="sliderCreaseX" min="0.2" max="2.3" step="0.001" value="1.150">
+            <div style="display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--subtle); margin-top: 0.2rem;">
+              <span>0.20 m</span>
+              <span>Slide or drag paper crease along floor</span>
+              <span>2.30 m</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: Student Lab Notebook Card (Zero-Clue Pedagogical Workflow) -->
+      <aside class="notebook-column" aria-label="Student Lab Notebook">
+        <div class="notebook-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span>📓</span> Student Lab Notebook
+            </div>
+            <span style="font-size: 0.76rem; color: var(--muted); font-weight: 600;">Inquiry Investigation</span>
+          </div>
+
+          <!-- Step 1: Photogate Speed Data -->
+          <div class="notebook-step">
+            <div class="step-badge">Step 1</div>
+            <h2 class="step-title">Photogate Speed Measurements</h2>
+            <p class="step-desc">
+              Release the ball from your chosen ramp position 3 times to measure the time it takes to travel between the two photogates (<span class="math-expr">d = 0.100 m</span>).
+            </p>
+
+            <table class="notebook-table">
+              <thead>
+                <tr>
+                  <th>Trial #</th>
+                  <th>Photogate Time (<span class="math-expr">Δt</span>)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Trial 1</td>
+                  <td id="nbGate1Time" style="font-family:'JetBrains Mono',monospace; font-weight:700;">--</td>
+                </tr>
+                <tr>
+                  <td>Trial 2</td>
+                  <td id="nbGate2Time" style="font-family:'JetBrains Mono',monospace; font-weight:700;">--</td>
+                </tr>
+                <tr>
+                  <td>Trial 3</td>
+                  <td id="nbGate3Time" style="font-family:'JetBrains Mono',monospace; font-weight:700;">--</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 0.75rem;">
+              <div>
+                <label style="font-size: 0.78rem; font-weight: 600; color: var(--muted); display: block; margin-bottom: 0.2rem;">
+                  Average <span class="math-expr">Δt</span> (s):
+                </label>
+                <input type="number" id="nbAvgTime" class="student-input" step="0.0001" placeholder="e.g. 0.0520">
+              </div>
+              <div>
+                <label style="font-size: 0.78rem; font-weight: 600; color: var(--muted); display: block; margin-bottom: 0.2rem;">
+                  Horizontal Speed <span class="math-expr">v<sub>0x</sub></span> (m/s):
+                </label>
+                <input type="number" id="nbCalcVx" class="student-input" step="0.01" placeholder="e.g. 1.92">
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2: Vertical Free Fall -->
+          <div class="notebook-step">
+            <div class="step-badge">Step 2</div>
+            <h2 class="step-title">Vertical Motion &amp; Fall Time</h2>
+            <p class="step-desc">
+              Read the table height <span class="math-expr">H</span> using the height measuring tape. Determine the time <span class="math-expr">t</span> required for the ball to fall from the table surface to the floor (<span class="math-expr">g = 9.80 m/s²</span>).
+            </p>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem;">
+              <div>
+                <label style="font-size: 0.78rem; font-weight: 600; color: var(--muted); display: block; margin-bottom: 0.2rem;">
+                  Table Height <span class="math-expr">H</span> (m):
+                </label>
+                <span id="nbTableHeight" style="font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--primary-teal); font-size:1rem;">0.90 m</span>
+              </div>
+              <div>
+                <label style="font-size: 0.78rem; font-weight: 600; color: var(--muted); display: block; margin-bottom: 0.2rem;">
+                  Calculated Fall Time <span class="math-expr">t</span> (s):
+                </label>
+                <input type="number" id="nbCalcFallTime" class="student-input" step="0.001" placeholder="e.g. 0.428">
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3: Landing Prediction -->
+          <div class="notebook-step">
+            <div class="step-badge">Step 3</div>
+            <h2 class="step-title">Predict Landing Distance (<span class="math-expr">x<sub>pred</sub></span>)</h2>
+            <p class="step-desc">
+              Combine your horizontal velocity and fall time to calculate how far from the table edge (plumb line) the ball will land.
+            </p>
+
+            <div style="display: flex; gap: 0.5rem; align-items: flex-end;">
+              <div style="flex: 1;">
+                <label style="font-size: 0.78rem; font-weight: 600; color: var(--muted); display: block; margin-bottom: 0.2rem;">
+                  Predicted Distance <span class="math-expr">x<sub>pred</sub></span> (m):
+                </label>
+                <input type="number" id="nbCalcXPred" class="student-input" step="0.001" placeholder="e.g. 1.152" style="max-width:100%;">
+              </div>
+              <button type="button" class="btn btn-teal btn-sm" id="btnApplyNotebookPred" style="white-space: nowrap; height:34px;">
+                🎯 Place Crease
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 4: Verification & Error Analysis -->
+          <div class="notebook-step">
+            <div class="step-badge">Step 4</div>
+            <h2 class="step-title">The Target Test Drop</h2>
+            <p class="step-desc">
+              With your target paper placed, release the ball from the exact same ramp height. Open the <strong>Inspect Target Paper</strong> view to see if your carbon dot hits the crease!
+            </p>
+            <div style="background: var(--surface-alt); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-light); font-size: 0.8rem;">
+              <span style="font-weight: 700; color: var(--primary-teal-dark);">💡 Physics Rule of Thumb:</span>
+              <span style="color: var(--muted);"> Consistent releases from the same spot produce tight carbon clusters within 2–4 mm of your prediction!</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Footer -->
+    <footer class="sim-footer">
+      <div>
+        <strong>The Thinking Experiment</strong> &bull; Physics Modeling Labs &bull; SI Metric Units
+      </div>
+      <div>
+        Designed for High School &amp; AP Physics Classrooms
+      </div>
+    </footer>
+  </div>
+
+  <!-- Magnified Target Paper Close-Up Modal -->
+  <div class="modal-backdrop" id="inspectModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">
+          <span>🎯</span> Target Paper Inspection: Hotdog Crease &amp; Carbon Marks
+        </h2>
+        <button type="button" class="close-btn" id="btnCloseModal" aria-label="Close dialog">&times;</button>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+        <span style="font-size: 0.85rem; color: var(--muted);">
+          Inspect the white folded sheet. The crease marks your prediction (<span class="math-expr">0 mm</span>). Black dots show actual ball impacts.
+        </span>
+        <button type="button" class="btn btn-sm btn-secondary" id="btnLiftCarbon">
+          🔍 Lift Carbon Paper (View Crease)
+        </button>
+      </div>
+
+      <div class="target-closeup-viewport">
+        <canvas id="targetCanvas" width="760" height="260"></canvas>
+      </div>
+
+      <!-- Evaluation summary cards -->
+      <div class="eval-summary-card" id="modalEvalSummary">
+        <div class="eval-item">
+          <span class="eval-item-label">Target Crease (Prediction)</span>
+          <span class="eval-item-value" style="color:var(--primary-teal);">1.150 m</span>
+        </div>
+        <div class="eval-item">
+          <span class="eval-item-label">Status</span>
+          <span class="eval-item-value" style="font-size: 0.95rem; color: var(--muted);">No strikes logged yet.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts: Zero external build dependencies -->
+  <script src="src/projectilesPhysics.js"></script>
+  <script src="src/projectilesApp.js"></script>
+</body>
+</html>
