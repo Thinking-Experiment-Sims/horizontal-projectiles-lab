@@ -6,10 +6,11 @@
  * table height measurement, hotdog-folded target paper with carbon paper placement,
  * and zero-clue student inquiry.
  * 
- * Includes:
- * 1. Ball catching at table edge before target paper is placed (hides landing trajectory).
- * 2. Permanent session locking via localStorage (cannot reload and try again).
- * 3. Teacher Reset Override with PIN authentication.
+ * Features:
+ * 1. Ball caught at table edge in catch box before target paper is placed (landing hidden).
+ * 2. Real-time photogate transit timing and trial memory log.
+ * 3. Hotdog-folded target paper with carbon paper placement.
+ * 4. High-resolution magnified target inspection modal with vernier millimeter scale.
  * 
  * Part of "The Thinking Experiment" PhysicsKit.
  * Strictly adheres to SI Metric units and The Thinking Experiment design system.
@@ -24,9 +25,6 @@
     console.error("ProjectilesPhysics module is required.");
     return;
   }
-
-  // Storage key for anti-cheating session lock
-  const STORAGE_KEY = "the_thinking_experiment_projectile_lab_v1";
 
   // Cross-browser safe rounded rectangle path helper (no ctx.roundRect)
   function drawRoundedRect(ctx, x, y, width, height, radius) {
@@ -87,9 +85,6 @@
       strikes: [] // list of impacts { dropNum, actualX, creaseX, devMm, evalResult }
     },
 
-    // Permanent Anti-Cheating Lock
-    isLocked: false, // true once official landing test is released onto target paper
-
     // Experimental settings
     noiseEnabled: true, // realistic slight hand/track scatter across 3 trials
     noiseStdDev: 0.0035, // ~0.35% velocity variation
@@ -115,7 +110,7 @@
     canvas: document.getElementById("simCanvas"),
     targetCanvas: document.getElementById("targetCanvas"),
 
-    // Lock banner
+    // Status banner
     lockBanner: document.getElementById("lockBanner"),
     lockBannerBadge: document.getElementById("lockBannerBadge"),
     lockBannerText: document.getElementById("lockBannerText"),
@@ -165,14 +160,6 @@
     btnCloseModal: document.getElementById("btnCloseModal"),
     btnLiftCarbon: document.getElementById("btnLiftCarbon"),
     modalEvalSummary: document.getElementById("modalEvalSummary"),
-
-    teacherModal: document.getElementById("teacherModal"),
-    btnTeacherReset: document.getElementById("btnTeacherReset"),
-    btnCloseTeacherModal: document.getElementById("btnCloseTeacherModal"),
-    btnCancelTeacherReset: document.getElementById("btnCancelTeacherReset"),
-    btnConfirmTeacherReset: document.getElementById("btnConfirmTeacherReset"),
-    teacherPinInput: document.getElementById("teacherPinInput"),
-    teacherPinError: document.getElementById("teacherPinError"),
 
     // Student Notebook
     nbGate1Time: document.getElementById("nbGate1Time"),
@@ -283,8 +270,6 @@
   let animFrameId = null;
 
   function resetBallToRelease() {
-    if (state.isLocked) return;
-
     state.phase = "ready";
     state.ball.s = state.releaseDistance;
     state.ball.vx = 0;
@@ -305,22 +290,14 @@
     dom.btnReset.disabled = true;
 
     if (!state.targetPaper.placed) {
-      updateLockBanner("practice");
+      updateBannerStatus("practice");
     } else {
-      updateLockBanner("ready");
+      updateBannerStatus("ready");
     }
   }
 
   function releaseBall() {
-    if (state.phase !== "ready" || state.isLocked) return;
-
-    // If target paper is placed, this is the OFFICIAL ONE-SHOT DROP! Lock the lab!
-    if (state.targetPaper.placed) {
-      state.isLocked = true;
-      saveLockState();
-      lockUI();
-      updateLockBanner("armed");
-    }
+    if (state.phase !== "ready") return;
 
     // Calculate exit velocity with optional realistic noise
     const noiseStd = state.noiseEnabled ? state.noiseStdDev : 0;
@@ -417,7 +394,7 @@
         updateConsoleLEDs();
       }
 
-      // 🛑 CRITICAL CLASSROOM LOGIC:
+      // 🛑 CLASSROOM LOGIC:
       // If target paper is NOT placed: Ball is CAUGHT at table edge in catch box!
       if (!state.targetPaper.placed) {
         if (state.ball.x >= -0.04) {
@@ -427,7 +404,7 @@
           state.ball.vy = 0;
           dom.btnReset.disabled = false;
           dom.btnRelease.disabled = true;
-          updateLockBanner("caught");
+          updateBannerStatus("caught");
         }
       } else {
         // Target paper IS placed: Free launch off table edge!
@@ -478,10 +455,9 @@
           state.phase = "stopped";
           state.ball.vx = 0;
           state.ball.vy = 0;
-          // Save completed locked state to localStorage
-          saveLockState();
-          lockUI();
-          updateLockBanner("locked");
+          dom.btnReset.disabled = false;
+          dom.btnRelease.disabled = false;
+          updateBannerStatus("recorded");
         }
       }
     }
@@ -511,7 +487,6 @@
       dom.targetStatusBadge.textContent = `${evalResult.rating} (${evalResult.absDeviationMm.toFixed(1)} mm)`;
       dom.targetStatusBadge.className = `target-status-badge ${evalResult.badgeClass}`;
       dom.btnInspectTarget.disabled = false;
-      saveLockState();
     }
 
     if (dom.inspectModal.classList.contains("open")) {
@@ -520,12 +495,12 @@
   }
 
   /**
-   * Updates the lock banner status above the canvas.
+   * Updates the status banner above the canvas.
    */
-  function updateLockBanner(mode) {
+  function updateBannerStatus(mode) {
     if (!dom.lockBanner) return;
 
-    if (mode === "practice" || (!state.targetPaper.placed && !state.isLocked)) {
+    if (mode === "practice" || !state.targetPaper.placed) {
       dom.lockBanner.className = "lock-banner practice";
       dom.lockBannerBadge.textContent = "🧤 Practice Timing";
       dom.lockBannerText.textContent = "Ball is caught at table edge. Landing is hidden until you place the folded carbon target paper!";
@@ -535,180 +510,16 @@
       dom.lockBannerBadge.textContent = "🧤 Ball Caught";
       dom.lockBannerText.textContent = `Timing logged (Δt = ${state.timer.elapsedTime.toFixed(4)} s). Calculate velocity & fall time, then place target paper!`;
       dom.lockBannerSub.textContent = "Safe in Catch Box";
-    } else if (mode === "ready" || (state.targetPaper.placed && !state.isLocked)) {
+    } else if (mode === "ready") {
       dom.lockBanner.className = "lock-banner ready";
-      dom.lockBannerBadge.textContent = "⚠️ Official Test Armed";
-      dom.lockBannerText.textContent = "Target paper placed! You have ONE SHOT to hit the crease. Once released, reloading will NOT reset your test!";
-      dom.lockBannerSub.textContent = "One Shot • No Retries";
-    } else if (mode === "armed") {
-      dom.lockBanner.className = "lock-banner locked";
-      dom.lockBannerBadge.textContent = "🔒 Flight in Progress";
-      dom.lockBannerText.textContent = "Official test launched! Results are being recorded to carbon paper...";
-      dom.lockBannerSub.textContent = "Locked";
-    } else if (mode === "locked" || state.isLocked) {
-      dom.lockBanner.className = "lock-banner locked";
-      dom.lockBannerBadge.textContent = "🔒 Test Completed & Locked";
-      dom.lockBannerText.textContent = "Official test recorded. Reloading preserves your result. Inspect the target paper to evaluate your prediction!";
-      dom.lockBannerSub.textContent = "Permanently Recorded";
-    }
-  }
-
-  /**
-   * Locks all interactive controls once the official drop is executed.
-   */
-  function lockUI() {
-    dom.sliderAngle.disabled = true;
-    dom.sliderRelease.disabled = true;
-    dom.sliderHeight.disabled = true;
-    dom.sliderCreaseX.disabled = true;
-    dom.inputCreaseX.disabled = true;
-    dom.btnPlaceTarget.disabled = true;
-    dom.btnRelease.disabled = true;
-    dom.btnRelease.innerHTML = "<span>🔒</span> Test Completed (Locked)";
-    dom.btnReset.disabled = true;
-    dom.btnClearLog.disabled = true;
-    dom.btnApplyNotebookPred.disabled = true;
-    dom.btnInspectTarget.disabled = false;
-  }
-
-  /**
-   * Unlocks all interactive controls (only via Teacher Reset).
-   */
-  function unlockUI() {
-    dom.sliderAngle.disabled = false;
-    dom.sliderRelease.disabled = false;
-    dom.sliderHeight.disabled = false;
-    dom.sliderCreaseX.disabled = false;
-    dom.inputCreaseX.disabled = false;
-    dom.btnPlaceTarget.disabled = false;
-    dom.btnRelease.disabled = false;
-    dom.btnRelease.innerHTML = "<span>🚀</span> Release Ball";
-    dom.btnReset.disabled = true;
-    dom.btnClearLog.disabled = false;
-    dom.btnApplyNotebookPred.disabled = false;
-  }
-
-  /**
-   * Saves locked test state to localStorage so reloading cannot bypass the test.
-   */
-  function saveLockState() {
-    const data = {
-      isLocked: state.isLocked,
-      phase: state.phase,
-      rampAngleDeg: state.rampAngleDeg,
-      releaseDistance: state.releaseDistance,
-      tableHeight: state.tableHeight,
-      photogateDistance: state.photogateDistance,
-      timerTrials: state.timer.trials,
-      lastElapsedTime: state.timer.elapsedTime,
-      targetPaper: state.targetPaper,
-      trajectoryPath: state.trajectoryPath,
-      ballFinal: {
-        x: state.ball.x,
-        y: state.ball.y,
-        rotation: state.ball.rotation
-      }
-    };
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (e) {
-      console.warn("Unable to save lock state to localStorage", e);
-    }
-  }
-
-  /**
-   * Restores locked state on page reload / refresh.
-   */
-  function loadLockState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      if (!data || !data.isLocked) return false;
-
-      state.isLocked = true;
-      state.rampAngleDeg = data.rampAngleDeg;
-      state.releaseDistance = data.releaseDistance;
-      state.tableHeight = data.tableHeight;
-      state.photogateDistance = data.photogateDistance || 0.100;
-      state.timer.trials = data.timerTrials || [];
-      state.timer.elapsedTime = data.lastElapsedTime || 0;
-      state.targetPaper = data.targetPaper || state.targetPaper;
-      state.targetPaper.placed = true;
-      state.trajectoryPath = data.trajectoryPath || [];
-
-      state.phase = "stopped";
-      if (data.ballFinal) {
-        state.ball.x = data.ballFinal.x;
-        state.ball.y = data.ballFinal.y;
-        state.ball.rotation = data.ballFinal.rotation;
-      }
-
-      // Sync slider UI
-      dom.sliderAngle.value = state.rampAngleDeg;
-      dom.valAngle.textContent = `${state.rampAngleDeg}°`;
-      dom.sliderRelease.value = state.releaseDistance;
-      dom.valRelease.textContent = `${(state.releaseDistance * 100).toFixed(0)} cm`;
-      dom.sliderHeight.value = state.tableHeight;
-      dom.valHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
-      dom.nbTableHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
-
-      if (state.targetPaper.creaseX) {
-        dom.inputCreaseX.value = state.targetPaper.creaseX.toFixed(3);
-        dom.sliderCreaseX.value = state.targetPaper.creaseX;
-      }
-
-      renderTrialsLog();
-      if (state.timer.elapsedTime > 0) {
-        dom.readoutTime.textContent = state.timer.elapsedTime.toFixed(4);
-      }
-
-      const lastStrike = state.targetPaper.strikes[state.targetPaper.strikes.length - 1];
-      if (lastStrike && lastStrike.evalResult) {
-        dom.targetStatusBadge.textContent = `${lastStrike.evalResult.rating} (${lastStrike.evalResult.absDeviationMm.toFixed(1)} mm)`;
-        dom.targetStatusBadge.className = `target-status-badge ${lastStrike.evalResult.badgeClass}`;
-      }
-
-      lockUI();
-      updateLockBanner("locked");
-      return true;
-    } catch (e) {
-      console.warn("Error reading localStorage lock state", e);
-      return false;
-    }
-  }
-
-  /**
-   * Teacher Reset: Clears lock and resets simulation.
-   */
-  function executeTeacherReset() {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (e) {}
-
-    state.isLocked = false;
-    state.targetPaper.placed = false;
-    state.targetPaper.strikes = [];
-    state.timer.trials = [];
-    state.trajectoryPath = [];
-
-    unlockUI();
-    resetBallToRelease();
-    renderTrialsLog();
-    updateLockBanner("practice");
-
-    dom.readoutTime.textContent = "0.0000";
-    dom.nbGate1Time.textContent = "--";
-    dom.nbGate2Time.textContent = "--";
-    dom.nbGate3Time.textContent = "--";
-    dom.btnPlaceTarget.textContent = "📄 Place Target Paper on Floor";
-    dom.btnPlaceTarget.className = "btn btn-primary";
-    dom.targetStatusBadge.textContent = "Not Placed";
-    dom.targetStatusBadge.className = "target-status-badge";
-    dom.btnInspectTarget.disabled = true;
-
-    if (dom.teacherModal) {
-      dom.teacherModal.classList.remove("open");
+      dom.lockBannerBadge.textContent = "🎯 Target Paper Placed";
+      dom.lockBannerText.textContent = "Crease positioned at predicted distance. Release the ball to test your prediction and leave a carbon mark!";
+      dom.lockBannerSub.textContent = "Target Ready";
+    } else if (mode === "recorded") {
+      dom.lockBanner.className = "lock-banner ready";
+      dom.lockBannerBadge.textContent = "🎯 Carbon Strike Recorded";
+      dom.lockBannerText.textContent = "Ball struck target paper! Click \"Inspect Target Paper\" to view the crease and measure your deviation.";
+      dom.lockBannerSub.textContent = "Mark Recorded";
     }
   }
 
@@ -797,7 +608,7 @@
     // 7. Draw Folded Target Paper with Carbon Paper on Floor
     drawTargetPaperOnFloor();
 
-    // 8. Draw Trajectory Trail (Only when paper was placed and official flight happened)
+    // 8. Draw Trajectory Trail
     if (state.showTrajectory && state.trajectoryPath.length > 1) {
       drawTrajectory();
     }
@@ -1526,23 +1337,20 @@
       dom.toggleNoise.textContent = state.noiseEnabled ? "🎲 Real Scatter: ON" : "🎯 Ideal Physics: ON";
     });
 
-    // Apparatus sliders (only if not locked)
+    // Apparatus sliders
     dom.sliderAngle.addEventListener("input", (e) => {
-      if (state.isLocked) return;
       state.rampAngleDeg = parseFloat(e.target.value);
       dom.valAngle.textContent = `${state.rampAngleDeg}°`;
       resetBallToRelease();
     });
 
     dom.sliderRelease.addEventListener("input", (e) => {
-      if (state.isLocked) return;
       state.releaseDistance = parseFloat(e.target.value);
       dom.valRelease.textContent = `${(state.releaseDistance * 100).toFixed(0)} cm`;
       resetBallToRelease();
     });
 
     dom.sliderHeight.addEventListener("input", (e) => {
-      if (state.isLocked) return;
       state.tableHeight = parseFloat(e.target.value);
       dom.valHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
       dom.nbTableHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
@@ -1551,24 +1359,22 @@
 
     // Target Placement Controls
     dom.btnPlaceTarget.addEventListener("click", () => {
-      if (state.isLocked) return;
       state.targetPaper.placed = !state.targetPaper.placed;
       if (state.targetPaper.placed) {
         dom.btnPlaceTarget.textContent = "📄 Remove Target Paper";
         dom.btnPlaceTarget.className = "btn btn-secondary";
         dom.targetStatusBadge.textContent = "Paper Placed on Floor";
         dom.btnInspectTarget.disabled = false;
-        updateLockBanner("ready");
+        updateBannerStatus("ready");
       } else {
         dom.btnPlaceTarget.textContent = "📄 Place Target Paper on Floor";
         dom.btnPlaceTarget.className = "btn btn-primary";
         dom.targetStatusBadge.textContent = "Not Placed";
-        updateLockBanner("practice");
+        updateBannerStatus("practice");
       }
     });
 
     dom.inputCreaseX.addEventListener("change", (e) => {
-      if (state.isLocked) return;
       let val = parseFloat(e.target.value);
       if (isNaN(val) || val < 0.2) val = 0.2;
       if (val > 2.3) val = 2.3;
@@ -1578,7 +1384,6 @@
     });
 
     dom.sliderCreaseX.addEventListener("input", (e) => {
-      if (state.isLocked) return;
       const val = parseFloat(e.target.value);
       state.targetPaper.creaseX = val;
       dom.inputCreaseX.value = val.toFixed(3);
@@ -1608,7 +1413,6 @@
 
     // Clear trial logs
     dom.btnClearLog.addEventListener("click", () => {
-      if (state.isLocked) return;
       state.timer.trials = [];
       state.targetPaper.strikes = [];
       dom.readoutTime.textContent = "0.0000";
@@ -1623,7 +1427,6 @@
 
     // Student notebook apply prediction
     dom.btnApplyNotebookPred.addEventListener("click", () => {
-      if (state.isLocked) return;
       const predVal = parseFloat(dom.nbCalcXPred.value);
       if (!isNaN(predVal) && predVal > 0.2 && predVal <= 2.4) {
         state.targetPaper.creaseX = predVal;
@@ -1634,44 +1437,11 @@
         dom.btnPlaceTarget.className = "btn btn-secondary";
         dom.targetStatusBadge.textContent = `Crease Set to ${predVal.toFixed(3)} m`;
         dom.btnInspectTarget.disabled = false;
-        updateLockBanner("ready");
+        updateBannerStatus("ready");
       } else {
         alert("Please enter a valid predicted landing distance between 0.20 m and 2.40 m.");
       }
     });
-
-    // Teacher Reset Modal Events
-    if (dom.btnTeacherReset) {
-      dom.btnTeacherReset.addEventListener("click", () => {
-        dom.teacherPinError.style.display = "none";
-        dom.teacherPinInput.value = "";
-        dom.teacherModal.classList.add("open");
-        dom.teacherPinInput.focus();
-      });
-    }
-
-    if (dom.btnCloseTeacherModal) {
-      dom.btnCloseTeacherModal.addEventListener("click", () => {
-        dom.teacherModal.classList.remove("open");
-      });
-    }
-
-    if (dom.btnCancelTeacherReset) {
-      dom.btnCancelTeacherReset.addEventListener("click", () => {
-        dom.teacherModal.classList.remove("open");
-      });
-    }
-
-    if (dom.btnConfirmTeacherReset) {
-      dom.btnConfirmTeacherReset.addEventListener("click", () => {
-        const pin = dom.teacherPinInput.value.trim().toLowerCase();
-        if (pin === "physics" || pin === "reset") {
-          executeTeacherReset();
-        } else {
-          dom.teacherPinError.style.display = "block";
-        }
-      });
-    }
 
     // Canvas interactions
     bindCanvasInteractions();
@@ -1705,8 +1475,6 @@
     window.addEventListener("touchend", handlePointerUp);
 
     function handlePointerDown(e) {
-      if (state.isLocked) return;
-
       const pos = getCanvasCoords(e);
       state.mouseWorld = pos.world;
 
@@ -1731,7 +1499,7 @@
     }
 
     function handlePointerMove(e) {
-      if (!state.dragging || state.isLocked) return;
+      if (!state.dragging) return;
       const pos = getCanvasCoords(e);
 
       if (state.dragging === "ball" && state.phase === "ready") {
@@ -1779,14 +1547,9 @@
   function init() {
     updateWorldScale();
     bindEvents();
-
-    // Check if test was locked in localStorage (prevents reload and try again)
-    const wasLocked = loadLockState();
-    if (!wasLocked) {
-      resetBallToRelease();
-      renderTrialsLog();
-      updateLockBanner("practice");
-    }
+    resetBallToRelease();
+    renderTrialsLog();
+    updateBannerStatus("practice");
 
     dom.nbTableHeight.textContent = `${state.tableHeight.toFixed(2)} m`;
     animFrameId = requestAnimationFrame(animLoop);

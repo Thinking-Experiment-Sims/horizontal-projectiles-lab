@@ -341,7 +341,7 @@
         <strong>The Thinking Experiment</strong> &bull; Physics Modeling Labs &bull; SI Metric Units
       </div>
       <div>
-        Designed for High School &amp; AP Physics Classrooms &bull; <button type="button" class="teacher-link" id="btnTeacherReset">Teacher Reset Override</button>
+        Designed for High School &amp; AP Physics Classrooms
       </div>
     </footer>
   </div>
@@ -379,32 +379,6 @@
           <span class="eval-item-label">Status</span>
           <span class="eval-item-value" style="font-size: 0.95rem; color: var(--muted);">No strikes logged yet.</span>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Teacher Reset Override Modal -->
-  <div class="modal-backdrop" id="teacherModal" role="dialog" aria-modal="true" aria-labelledby="teacherModalTitle">
-    <div class="modal-card" style="max-width: 440px;">
-      <div class="modal-header">
-        <h2 class="modal-title" id="teacherModalTitle">
-          <span>🔑</span> Teacher Reset Override
-        </h2>
-        <button type="button" class="close-btn" id="btnCloseTeacherModal" aria-label="Close dialog">&times;</button>
-      </div>
-      <p style="font-size: 0.88rem; color: var(--muted); margin-bottom: 0.85rem; line-height: 1.45;">
-        This action clears the permanent student test lock and resets the laboratory apparatus for the next student or class period.
-      </p>
-      <div style="margin-bottom: 1.1rem;">
-        <label for="teacherPinInput" style="font-size: 0.82rem; font-weight: 700; color: var(--ink); display: block; margin-bottom: 0.35rem;">
-          Enter Teacher PIN (default: <span style="color:var(--primary-teal); font-family:'JetBrains Mono',monospace;">physics</span> or type <span style="color:var(--accent-amber-dark); font-family:'JetBrains Mono',monospace;">RESET</span>):
-        </label>
-        <input type="password" id="teacherPinInput" class="student-input" style="max-width: 100%; width: 100%; font-size: 0.95rem; padding: 0.5rem 0.65rem;" placeholder="Enter PIN">
-        <span id="teacherPinError" style="font-size: 0.78rem; color: var(--error); display: none; margin-top: 0.35rem;">Incorrect PIN. Try 'physics' or 'RESET'.</span>
-      </div>
-      <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
-        <button type="button" class="btn btn-secondary btn-sm" id="btnCancelTeacherReset">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" id="btnConfirmTeacherReset">Unlock &amp; Reset Lab</button>
       </div>
     </div>
   </div>
